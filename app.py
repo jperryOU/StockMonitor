@@ -240,7 +240,6 @@ render_html(bench_html)
 # ---------------------------------------------------------
 # TABS SETUP
 # ---------------------------------------------------------
-
 tab_portfolio, tab_sector, tab_commodities = st.tabs(["💼 PORTFOLIO VIEWER", "📊 ACTIVE SECTOR EXPLORER", "🛢️ COMMODITY & DERIVATIVE FUTURES"])
 
 # ---------------------------------------------------------
