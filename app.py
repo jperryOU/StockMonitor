@@ -252,24 +252,37 @@ def load_portfolio_holdings():
     if not csv_files:
         return []
     
-    # Read Fidelity export CSV
-    df = pd.read_csv(csv_files[0])
+    # Read Fidelity export CSV, skipping header comments or finding the header row
+    df = None
+    for skip in range(10):
+        try:
+            temp_df = pd.read_csv(csv_files[0], skiprows=skip)
+            if "Symbol" in temp_df.columns and "Quantity" in temp_df.columns:
+                df = temp_df
+                break
+        except Exception:
+            continue
+            
+    if df is None:
+        try:
+            df = pd.read_csv(csv_files[0])
+        except Exception:
+            return []
+            
     holdings = []
-    
     for _, row in df.iterrows():
         symbol = str(row.get("Symbol", "")).strip()
-        # Filter out headers, empty rows, cash sweeps (SPAXX**), pending activities, or disclaimer rows
-        if not symbol or symbol == "nan" or "Pending" in symbol or "**" in symbol:
+        if not symbol or symbol == "nan" or symbol.startswith("Pending") or symbol.startswith("The data") or symbol.startswith("Brokerage") or symbol.startswith("Date") or symbol.startswith("Account"):
             continue
         
         try:
             qty_raw = str(row.get("Quantity", 0)).replace(",", "").strip()
-            qty = float(qty_raw) if qty_raw else 0.0
+            qty = float(qty_raw) if qty_raw and qty_raw != "nan" else 0.0
             if qty <= 0:
                 continue
             
             cost_raw = str(row.get("Average cost basis", "0")).replace("$", "").replace(",", "").strip()
-            cost = float(cost_raw) if cost_raw and cost_raw != "n/a" else 0.0
+            cost = float(cost_raw) if cost_raw and cost_raw != "nan" and cost_raw != "n/a" else 0.0
             
             holdings.append({
                 "ticker": symbol.upper(),
@@ -279,7 +292,7 @@ def load_portfolio_holdings():
         except Exception:
             continue
             
-    # Aggregate multiple lots of the same symbol (e.g. VOO Margin & Cash)
+    # Aggregate multiple lots of the same symbol (e.g., VOO Cash & Margin lots)
     agg_holdings = {}
     for h in holdings:
         t = h["ticker"]
