@@ -333,7 +333,7 @@ with tab_portfolio:
             cue = '<span class="bullish-badge">▲ Bullish</span>' if r["bullish"] else '<span class="bearish-badge">▼ Bearish</span>'
             spark = make_svg_sparkline(r["sparkline"], is_positive=(r["overall_dlr"] >= 0))
             
-            port_html += f'<tr><td style="font-weight:600;">{r["ticker"]}</td><td>{r["name"]}</td><td>{r["shares"]:,}</td><td>${r["cost"]:.2f}</td><td>${r["price"]:.2f}</td><td>${r["mval"]:,.2f}</td><td class="{c_daily}">{s_daily_dlr}${r["daily_dlr"]:,.2f}</td><td class="{c_daily}">{s_daily_pct}{r["daily_pct']:.2f}%</td><td class="{c_overall}">{s_overall_dlr}${r["overall_dlr"]:,.2f}</td><td class="{c_overall}">{s_overall_pct}{r["overall_pct']:.2f}%</td><td style="text-align:center;">{cue}</td><td>{spark}</td></tr>'
+            port_html += f'<tr><td style="font-weight:600;">{r["ticker"]}</td><td>{r["name"]}</td><td>{r["shares"]:,}</td><td>${r["cost"]:.2f}</td><td>${r["price"]:.2f}</td><td>${r["mval"]:,.2f}</td><td class="{c_daily}">{s_daily_dlr}${r["daily_dlr"]:,.2f}</td><td class="{c_daily}">{s_daily_pct}{r["daily_pct"]:.2f}%</td><td class="{c_overall}">{s_overall_dlr}${r["overall_dlr"]:,.2f}</td><td class="{c_overall}">{s_overall_pct}{r["overall_pct"]:.2f}%</td><td style="text-align:center;">{cue}</td><td>{spark}</td></tr>'
         
         port_html += '</tbody></table></div>'
         render_html(port_html)
