@@ -4,15 +4,132 @@ import pandas as pd
 import numpy as np
 
 st.set_page_config(
-    page_title="Sector & Commodity Intelligence",
+    page_title="Sector Intelligence & Momentum",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
 # ---------------------------------------------------------
+# CUSTOM TERMINAL / SPREADSHEET CSS
+# ---------------------------------------------------------
+st.markdown("""
+<style>
+    /* Global page padding */
+    .block-container {
+        padding-top: 1.5rem;
+        padding-bottom: 2rem;
+        padding-left: 2rem;
+        padding-right: 2rem;
+    }
+    
+    /* Benchmark Ribbon Grid */
+    .benchmark-container {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(115px, 1fr));
+        gap: 6px;
+        margin-bottom: 20px;
+    }
+    .bench-card {
+        border: 1px solid #D0D7DE;
+        background: #FFFFFF;
+        text-align: center;
+        padding: 6px 4px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    .bench-title {
+        font-size: 10.5px;
+        font-weight: 600;
+        color: #24292F;
+        border-bottom: 1px solid #E1E4E8;
+        padding-bottom: 3px;
+        margin-bottom: 3px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .bench-price {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: -0.2px;
+    }
+    
+    /* Financial Table Styling */
+    .sheet-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 11.5px;
+        background-color: #FFFFFF;
+        border: 1px solid #D0D7DE;
+        margin-bottom: 25px;
+    }
+    .sheet-table th {
+        background-color: #1A365D;
+        color: #FFFFFF;
+        font-weight: 600;
+        padding: 5px 8px;
+        border: 1px solid #2D3748;
+        text-align: left;
+        white-space: nowrap;
+    }
+    .sheet-table td {
+        padding: 4.5px 8px;
+        border: 1px solid #E1E4E8;
+        color: #24292F;
+        white-space: nowrap;
+    }
+    .sheet-table tr:hover {
+        background-color: #F8FAFC;
+    }
+    
+    /* Section Banner Header */
+    .section-banner {
+        background-color: #0C2340;
+        color: #FFFFFF;
+        font-weight: bold;
+        font-size: 12.5px;
+        letter-spacing: 0.5px;
+        padding: 7px 12px;
+        border-top-left-radius: 4px;
+        border-top-right-radius: 4px;
+        text-transform: uppercase;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    
+    /* Conditional formatting helper classes */
+    .pos-cell {
+        background-color: #E6F4EA !important;
+        color: #137333 !important;
+        font-weight: 500;
+    }
+    .neg-cell {
+        background-color: #FCE8E6 !important;
+        color: #C5221F !important;
+        font-weight: 500;
+    }
+    .bullish-badge {
+        background-color: #E6F4EA;
+        color: #137333;
+        font-weight: 600;
+        padding: 2px 6px;
+        border-radius: 3px;
+        display: inline-block;
+    }
+    .bearish-badge {
+        background-color: #FCE8E6;
+        color: #C5221F;
+        font-weight: 600;
+        padding: 2px 6px;
+        border-radius: 3px;
+        display: inline-block;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# ---------------------------------------------------------
 # CACHED DATA FETCHER
 # ---------------------------------------------------------
-@st.cache_data(ttl=300)  # Caches data for 5 minutes
+@st.cache_data(ttl=300)
 def fetch_ticker_data(tickers):
     data_dict = {}
     for t in tickers:
@@ -28,25 +145,19 @@ def fetch_ticker_data(tickers):
             low = df["Low"].dropna()
             volume = df["Volume"].dropna()
 
-            # Technical indicators
             ema_9 = close.ewm(span=9, adjust=False).mean()
             ema_21 = close.ewm(span=21, adjust=False).mean()
-            
-            # 30-Day Return
+
             hist_30 = close.iloc[-22:] if len(close) >= 22 else close
             gain_30 = ((close.iloc[-1] - hist_30.iloc[0]) / hist_30.iloc[0]) * 100
 
-            # Day & 52-Wk Range
             info = stock.info or {}
             market_cap = info.get("marketCap", None)
             pe_ratio = info.get("trailingPE", None)
-            long_name = info.get("shortName", ticker)
-
-            # Sparkline sequence (normalized 30-day close history)
-            spark_series = hist_30.tolist()
+            short_name = info.get("shortName", ticker)
 
             data_dict[ticker] = {
-                "name": long_name,
+                "name": short_name,
                 "price": float(close.iloc[-1]),
                 "change_dlr": float(close.iloc[-1] - close.iloc[-2]),
                 "change_pct": float((close.iloc[-1] - close.iloc[-2]) / close.iloc[-2] * 100),
@@ -60,49 +171,90 @@ def fetch_ticker_data(tickers):
                 "high_52": float(close.max()),
                 "market_cap": market_cap,
                 "pe_ratio": pe_ratio,
-                "sparkline": spark_series,
+                "sparkline": hist_30.tolist(),
                 "bullish": bool(ema_9.iloc[-1] > ema_21.iloc[-1])
             }
         except Exception:
             continue
     return data_dict
 
-# ---------------------------------------------------------
-# 1. TOP MACRO & SECTOR BENCHMARK RIBBON
-# ---------------------------------------------------------
-st.markdown("### 🌐 Real-Time Sector Intelligence & Macro Benchmarks")
+def make_svg_sparkline(prices, is_positive=True, width=110, height=22):
+    if not prices or len(prices) < 2:
+        return ""
+    min_p, max_p = min(prices), max(prices)
+    rng = max_p - min_p if max_p != min_p else 1.0
+    pts = []
+    step = width / (len(prices) - 1)
+    for i, p in enumerate(prices):
+        x = i * step
+        y = height - ((p - min_p) / rng * (height - 6) + 3)
+        pts.append(f"{x:.1f},{y:.1f}")
+    color = "#137333" if is_positive else "#C5221F"
+    return f'<svg width="{width}" height="{height}" style="display:block; margin:auto;"><polyline fill="none" stroke="{color}" stroke-width="1.8" points="{" ".join(pts)}"/></svg>'
 
-benchmarks = [
-    "SPY", "QQQ", "DIA", "XLK", "XLV", "XLF", 
-    "XLY", "XLC", "XLI", "XLP", "XLE", "XLU", "XLRE", "XLB"
+def fmt_mcap(val):
+    if not val or pd.isna(val):
+        return "--"
+    if val >= 1e12:
+        return f"${val / 1e12:.2f}T"
+    if val >= 1e9:
+        return f"${val / 1e9:.2f}B"
+    return f"${val / 1e6:.2f}M"
+
+# ---------------------------------------------------------
+# 1. TOP BENCHMARK RIBBON (NO TRUNCATION / NO ELLIPSIS)
+# ---------------------------------------------------------
+st.markdown("### 🌐 REAL-TIME SECTOR INTELLIGENCE & MOMENTUM DASHBOARD")
+st.markdown("<p style='font-size:12px; color:#57606A; margin-top:-10px;'>GICS Sector SPDR Benchmarks • Interactive Sector Explorer • Top Market Cap Giants • Top Momentum Gainers</p>", unsafe_allow_html=True)
+
+benchmarks_meta = [
+    ("XLK", "XLK • Tech"),
+    ("XLV", "XLV • Health"),
+    ("XLF", "XLF • Financials"),
+    ("XLY", "XLY • Cons Disc"),
+    ("XLC", "XLC • Commun."),
+    ("XLI", "XLI • Industrials"),
+    ("XLP", "XLP • Staples"),
+    ("XLE", "XLE • Energy"),
+    ("XLU", "XLU • Utilities"),
+    ("XLRE", "XLRE • Real Est"),
+    ("XLB", "XLB • Materials"),
+    ("SPY", "SPY • S&P 500"),
+    ("QQQ", "QQQ • Nasdaq"),
+    ("DIA", "DIA • Dow Jones")
 ]
 
-bench_data = fetch_ticker_data(benchmarks)
+bench_data = fetch_ticker_data([b[0] for b in benchmarks_meta])
 
-# Display in a clean responsive grid
-cols = st.columns(len(benchmarks))
-for i, ticker in enumerate(benchmarks):
-    with cols[i]:
-        if ticker in bench_data:
-            d = bench_data[ticker]
-            st.metric(
-                label=ticker,
-                value=f"${d['price']:.2f}",
-                delta=f"{d['change_pct']:+.2f}%"
-            )
-        else:
-            st.metric(label=ticker, value="--", delta="--")
-
-st.markdown("---")
+bench_html = '<div class="benchmark-container">'
+for ticker, label in benchmarks_meta:
+    if ticker in bench_data:
+        d = bench_data[ticker]
+        color = "#137333" if d["change_pct"] >= 0 else "#C5221F"
+        sign = "+" if d["change_pct"] >= 0 else ""
+        bench_html += f"""
+        <div class="bench-card">
+            <div class="bench-title">{label}</div>
+            <div class="bench-price" style="color: {color};">
+                ${d['price']:.2f} ({sign}{d['change_pct']:.2f}%)
+            </div>
+        </div>
+        """
+    else:
+        bench_html += f"""
+        <div class="bench-card">
+            <div class="bench-title">{label}</div>
+            <div class="bench-price" style="color: #57606A;">--</div>
+        </div>
+        """
+bench_html += '</div>'
+st.markdown(bench_html, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# TABS FOR NAVIGATION
+# TABS SETUP
 # ---------------------------------------------------------
-tab_sector, tab_commodities = st.tabs(["📊 Active Sector Explorer", "🛢️ Commodity & Derivative Futures"])
+tab_sector, tab_commodities = st.tabs(["📊 ACTIVE SECTOR EXPLORER", "🛢️ COMMODITY & DERIVATIVE FUTURES"])
 
-# ---------------------------------------------------------
-# 2. ACTIVE SECTOR EXPLORER TAB
-# ---------------------------------------------------------
 SECTOR_DATASETS = {
     "Communication Services": [
         "GOOGL", "META", "NFLX", "VZ", "DIS", "TMUS", "T", "SPOT", 
@@ -116,20 +268,19 @@ SECTOR_DATASETS = {
     ],
     "Energy": [
         "XOM", "CVX", "COP", "SLB", "EOG", "MPC", "PSX", "VLO", "OXY", "KMI", "WMB"
+    ],
+    "Healthcare": [
+        "LLY", "UNH", "JNJ", "ABBV", "MRK", "TMO", "ABT", "PFE", "AMGN", "DHR", "BMY", "ISRG"
     ]
 }
 
-def format_market_cap(val):
-    if not val or pd.isna(val):
-        return "--"
-    if val >= 1e12:
-        return f"${val / 1e12:.2f}T"
-    if val >= 1e9:
-        return f"${val / 1e9:.2f}B"
-    return f"${val / 1e6:.2f}M"
-
 with tab_sector:
-    selected_sector = st.selectbox("Select Sector", list(SECTOR_DATASETS.keys()), index=0)
+    col_sel, col_note = st.columns([1, 3])
+    with col_sel:
+        selected_sector = st.selectbox("Select Sector", list(SECTOR_DATASETS.keys()), index=0)
+    with col_note:
+        st.markdown("<p style='font-size:12px; color:#57606A; margin-top:28px;'>• Showing Top 20 Market Cap Leaders & Top 10 30-Day Gainers</p>", unsafe_allow_html=True)
+
     sector_tickers = SECTOR_DATASETS[selected_sector]
     sec_data = fetch_ticker_data(sector_tickers)
 
@@ -138,145 +289,171 @@ with tab_sector:
         if t in sec_data:
             d = sec_data[t]
             rows.append({
-                "Ticker": t,
-                "Company Name": d["name"],
-                "Price": d["price"],
-                "Change ($)": d["change_dlr"],
-                "Change (%)": d["change_pct"],
-                "30-Day Gain (%)": d["gain_30"],
-                "Market Cap": format_market_cap(d["market_cap"]),
-                "P/E Ratio": f"{d['pe_ratio']:.2f}" if d["pe_ratio"] else "--",
-                "Momentum Cue": "▲ Bullish" if d["bullish"] else "▼ Bearish",
-                "30-Day Trend": d["sparkline"],
-                "raw_mcap": d["market_cap"] or 0,
-                "raw_gain": d["gain_30"]
+                "ticker": t,
+                "name": d["name"],
+                "sector": selected_sector,
+                "price": d["price"],
+                "chg_dlr": d["change_dlr"],
+                "chg_pct": d["change_pct"],
+                "gain_30": d["gain_30"],
+                "mcap": d["market_cap"],
+                "mcap_fmt": fmt_mcap(d["market_cap"]),
+                "pe": f"{d['pe_ratio']:.2f}" if d["pe_ratio"] else "--",
+                "bullish": d["bullish"],
+                "sparkline": d["sparkline"]
             })
 
     if rows:
-        df_sec = pd.DataFrame(rows)
-        
-        col_left, col_right = st.columns(2)
-        
-        # Table 1: Top Market Cap Giants
-        with col_left:
-            st.markdown("#### 🏢 Top Market Cap Leaders")
-            df_mcap = df_sec.sort_values(by="raw_mcap", ascending=False).drop(columns=["raw_mcap", "raw_gain"])
-            st.dataframe(
-                df_mcap,
-                column_config={
-                    "Price": st.column_config.NumberColumn(format="$%.2f"),
-                    "Change ($)": st.column_config.NumberColumn(format="$%.2f"),
-                    "Change (%)": st.column_config.NumberColumn(format="%+.2f%%"),
-                    "30-Day Gain (%)": st.column_config.NumberColumn(format="%+.2f%%"),
-                    "30-Day Trend": st.column_config.LineChartColumn("30-Day Trend")
-                },
-                hide_index=True,
-                use_container_width=True
-            )
-            
-        # Table 2: Top Momentum Gainers (30-Day)
-        with col_right:
-            st.markdown("#### 🚀 Top 30-Day Momentum Leaders")
-            df_mom = df_sec.sort_values(by="raw_gain", ascending=False).drop(columns=["raw_mcap", "raw_gain"]).head(10)
-            st.dataframe(
-                df_mom,
-                column_config={
-                    "Price": st.column_config.NumberColumn(format="$%.2f"),
-                    "Change ($)": st.column_config.NumberColumn(format="$%.2f"),
-                    "Change (%)": st.column_config.NumberColumn(format="%+.2f%%"),
-                    "30-Day Gain (%)": st.column_config.NumberColumn(format="%+.2f%%"),
-                    "30-Day Trend": st.column_config.LineChartColumn("30-Day Trend")
-                },
-                hide_index=True,
-                use_container_width=True
-            )
+        col_l, col_r = st.columns(2)
+
+        # 1. TOP MARKET CAP TABLE
+        with col_l:
+            sorted_mcap = sorted(rows, key=lambda x: (x["mcap"] or 0), reverse=True)
+            tbl_html = """
+            <div class="section-banner">TOP MARKET CAP LEADERS</div>
+            <table class="sheet-table">
+                <thead>
+                    <tr>
+                        <th>Ticker</th><th>Company Name</th><th>Price</th><th>Change ($)</th><th>Change (%)</th><th>30D Gain</th><th>Market Cap</th><th>P/E</th><th>Momentum</th><th>30-Day Trend</th>
+                    </tr>
+                </thead>
+                <tbody>
+            """
+            for r in sorted_mcap:
+                c_dlr = "pos-cell" if r["chg_dlr"] >= 0 else "neg-cell"
+                c_pct = "pos-cell" if r["chg_pct"] >= 0 else "neg-cell"
+                c_30 = "pos-cell" if r["gain_30"] >= 0 else "neg-cell"
+                s_dlr = "+" if r["chg_dlr"] >= 0 else ""
+                s_pct = "+" if r["chg_pct"] >= 0 else ""
+                s_30 = "+" if r["gain_30"] >= 0 else ""
+                cue = '<span class="bullish-badge">▲ Bullish</span>' if r["bullish"] else '<span class="bearish-badge">▼ Bearish</span>'
+                spark = make_svg_sparkline(r["sparkline"], is_positive=(r["gain_30"] >= 0))
+
+                tbl_html += f"""
+                <tr>
+                    <td style="font-weight:600;">{r['ticker']}</td>
+                    <td style="max-width:130px; overflow:hidden; text-overflow:ellipsis;">{r['name']}</td>
+                    <td>${r['price']:.2f}</td>
+                    <td class="{c_dlr}">{s_dlr}${r['chg_dlr']:.2f}</td>
+                    <td class="{c_pct}">{s_pct}{r['chg_pct']:.2f}%</td>
+                    <td class="{c_30}">{s_30}{r['gain_30']:.2f}%</td>
+                    <td>{r['mcap_fmt']}</td>
+                    <td>{r['pe']}</td>
+                    <td style="text-align:center;">{cue}</td>
+                    <td>{spark}</td>
+                </tr>
+                """
+            tbl_html += "</tbody></table>"
+            st.markdown(tbl_html, unsafe_allow_html=True)
+
+        # 2. TOP MOMENTUM TABLE
+        with col_r:
+            sorted_mom = sorted(rows, key=lambda x: x["gain_30"], reverse=True)[:10]
+            tbl_html2 = """
+            <div class="section-banner">TOP 10 30-DAY GAINERS (MOMENTUM LEADERS)</div>
+            <table class="sheet-table">
+                <thead>
+                    <tr>
+                        <th>Ticker</th><th>Company Name</th><th>Price</th><th>30D Gain</th><th>Today Change</th><th>Market Cap</th><th>Momentum</th><th>30-Day Trend</th>
+                    </tr>
+                </thead>
+                <tbody>
+            """
+            for r in sorted_mom:
+                c_pct = "pos-cell" if r["chg_pct"] >= 0 else "neg-cell"
+                c_30 = "pos-cell" if r["gain_30"] >= 0 else "neg-cell"
+                s_pct = "+" if r["chg_pct"] >= 0 else ""
+                s_30 = "+" if r["gain_30"] >= 0 else ""
+                cue = '<span class="bullish-badge">▲ Bullish</span>' if r["bullish"] else '<span class="bearish-badge">▼ Bearish</span>'
+                spark = make_svg_sparkline(r["sparkline"], is_positive=(r["gain_30"] >= 0))
+
+                tbl_html2 += f"""
+                <tr>
+                    <td style="font-weight:600;">{r['ticker']}</td>
+                    <td style="max-width:130px; overflow:hidden; text-overflow:ellipsis;">{r['name']}</td>
+                    <td>${r['price']:.2f}</td>
+                    <td class="{c_30}">{s_30}{r['gain_30']:.2f}%</td>
+                    <td class="{c_pct}">{s_pct}{r['chg_pct']:.2f}%</td>
+                    <td>{r['mcap_fmt']}</td>
+                    <td style="text-align:center;">{cue}</td>
+                    <td>{spark}</td>
+                </tr>
+                """
+            tbl_html2 += "</tbody></table>"
+            st.markdown(tbl_html2, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 3. COMMODITY & DERIVATIVE FUTURES TAB
+# 3. COMMODITIES TAB
 # ---------------------------------------------------------
 COMMODITIES_REGISTRY = [
-    # Crude Oil
     {"group": "Crude Oil", "benchmark": "WTI Light Sweet Crude", "ticker": "USO", "name": "United States Oil Fund LP", "leverage": "1x Spot / Front-Month", "expense": "0.60%"},
     {"group": "Crude Oil", "benchmark": "Bloomberg WTI Crude Subindex", "ticker": "UCO", "name": "ProShares Ultra Bloomberg Crude", "leverage": "2x Daily Leveraged Long", "expense": "0.95%"},
     {"group": "Crude Oil", "benchmark": "Bloomberg WTI Crude Subindex", "ticker": "SCO", "name": "ProShares UltraShort Bloomberg Crude", "leverage": "-2x Leveraged Inverse", "expense": "0.95%"},
     {"group": "Crude Oil", "benchmark": "WTI Crude Futures (12-Month)", "ticker": "USL", "name": "United States 12 Month Oil Fund", "leverage": "1x 12-Month Strip Curve", "expense": "0.90%"},
     {"group": "Crude Oil", "benchmark": "ICE Brent Crude Futures", "ticker": "BNO", "name": "United States Brent Oil Fund LP", "leverage": "1x Front-Month Brent", "expense": "1.02%"},
-    # Refined Products
     {"group": "Refined Products", "benchmark": "NYMEX RBOB Gasoline", "ticker": "UGA", "name": "United States Gasoline Fund LP", "leverage": "1x Front-Month RBOB Gas", "expense": "0.97%"},
     {"group": "Refined Products", "benchmark": "DBIQ Optimum Yield Energy", "ticker": "DBE", "name": "Invesco DB Energy Fund", "leverage": "1x Multi-Fuel & Heating Oil", "expense": "0.77%"},
     {"group": "Refined Products", "benchmark": "MVIS Global Oil Refiners", "ticker": "CRAK", "name": "VanEck Oil Refiners ETF", "leverage": "1x Crack Spread Refiners", "expense": "0.60%"},
-    # Natural Gas
     {"group": "Natural Gas", "benchmark": "Henry Hub Natural Gas", "ticker": "UNG", "name": "United States Natural Gas Fund", "leverage": "1x Front-Month Nat Gas", "expense": "1.06%"},
     {"group": "Natural Gas", "benchmark": "Bloomberg Nat Gas Subindex", "ticker": "BOIL", "name": "ProShares Ultra Bloomberg Nat Gas", "leverage": "2x Daily Leveraged Long", "expense": "0.95%"},
     {"group": "Natural Gas", "benchmark": "Bloomberg Nat Gas Subindex", "ticker": "KOLD", "name": "ProShares UltraShort Nat Gas", "leverage": "-2x Leveraged Inverse", "expense": "0.95%"},
-    # Biofuels
     {"group": "Biofuels", "benchmark": "CBOT Corn Futures", "ticker": "CORN", "name": "Teucrium Corn Fund", "leverage": "1x Ethanol Feedstock", "expense": "0.26%"},
     {"group": "Biofuels", "benchmark": "US Ethanol Production", "ticker": "GPRE", "name": "Green Plains Inc.", "leverage": "1x Pure Ethanol Refiner", "expense": "Operating"},
     {"group": "Biofuels", "benchmark": "Renewable Fuels", "ticker": "AMTX", "name": "Aemetis, Inc.", "leverage": "1x Biodiesel & RNG Producer", "expense": "Operating"},
-    # Metals
     {"group": "Metals", "benchmark": "COMEX Gold Futures (/GC)", "ticker": "GLD", "name": "SPDR Gold Trust", "leverage": "1x Physical Gold Bullion", "expense": "0.40%"},
     {"group": "Metals", "benchmark": "COMEX Silver Futures (/SI)", "ticker": "SLV", "name": "iShares Silver Trust", "leverage": "1x Physical Silver Bullion", "expense": "0.50%"},
     {"group": "Metals", "benchmark": "COMEX Copper Futures (/HG)", "ticker": "CPER", "name": "United States Copper Index Fund", "leverage": "1x Front-Month Copper", "expense": "0.88%"},
-    # Broad Commodities
     {"group": "Broad Commodities", "benchmark": "DBIQ Diversified Commodity", "ticker": "DBC", "name": "Invesco DB Commodity Index", "leverage": "1x Multi-Commodity Strip", "expense": "0.85%"},
     {"group": "Broad Commodities", "benchmark": "Energy Select Sector", "ticker": "XLE", "name": "Energy Select Sector SPDR", "leverage": "1x Large-Cap Energy", "expense": "0.09%"}
 ]
 
 with tab_commodities:
-    st.markdown("#### ⚡ Commodity & Derivative Futures (Energy, Metals, Ag & Leveraged Funds)")
+    st.markdown('<div class="section-banner">COMMODITY & DERIVATIVE FUTURES (ENERGY, METALS, AG & LEVERAGED FUNDS)</div>', unsafe_allow_html=True)
     
-    selected_group = st.selectbox(
-        "Filter by Commodity Group", 
-        ["All"] + sorted(list(set(c["group"] for c in COMMODITIES_REGISTRY)))
-    )
-
-    active_comms = [c for c in COMMODITIES_REGISTRY if selected_group == "All" or c["group"] == selected_group]
-    comm_tickers = [c["ticker"] for c in active_comms]
+    comm_tickers = [c["ticker"] for c in COMMODITIES_REGISTRY]
     comm_data = fetch_ticker_data(comm_tickers)
 
-    comm_rows = []
-    for c in active_comms:
+    comm_html = """
+    <table class="sheet-table">
+        <thead>
+            <tr>
+                <th>Commodity Group</th><th>Underlying Benchmark</th><th>Ticker</th><th>Fund Name</th><th>Exposure / Leverage</th><th>Current Price</th><th>Change ($)</th><th>Change (%)</th><th>Day Range</th><th>9 EMA</th><th>21 EMA</th><th>30D Gain</th><th>Volume</th><th>Expense</th><th>Momentum</th><th>30-Day Trend</th>
+            </tr>
+        </thead>
+        <tbody>
+    """
+    for c in COMMODITIES_REGISTRY:
         t = c["ticker"]
         if t in comm_data:
             d = comm_data[t]
-            comm_rows.append({
-                "Group": c["group"],
-                "Benchmark": c["benchmark"],
-                "Ticker": t,
-                "Fund Name": c["name"],
-                "Leverage": c["leverage"],
-                "Price": d["price"],
-                "Change ($)": d["change_dlr"],
-                "Change (%)": d["change_pct"],
-                "Day Range": f"${d['day_low']:.2f} - ${d['day_high']:.2f}",
-                "9 EMA": d["ema_9"],
-                "21 EMA": d["ema_21"],
-                "30D Gain": d["gain_30"],
-                "Volume": f"{d['vol']:,}",
-                "Expense": c["expense"],
-                "Momentum": "▲ Bullish" if d["bullish"] else "▼ Bearish",
-                "30-Day Trend": d["sparkline"]
-            })
+            c_dlr = "pos-cell" if d["change_dlr"] >= 0 else "neg-cell"
+            c_pct = "pos-cell" if d["change_pct"] >= 0 else "neg-cell"
+            c_30 = "pos-cell" if d["gain_30"] >= 0 else "neg-cell"
+            s_dlr = "+" if d["change_dlr"] >= 0 else ""
+            s_pct = "+" if d["change_pct"] >= 0 else ""
+            s_30 = "+" if d["gain_30"] >= 0 else ""
+            cue = '<span class="bullish-badge">▲ Bullish</span>' if d["bullish"] else '<span class="bearish-badge">▼ Bearish</span>'
+            spark = make_svg_sparkline(d["sparkline"], is_positive=(d["gain_30"] >= 0))
 
-    if comm_rows:
-        df_comm = pd.DataFrame(comm_rows)
-        st.dataframe(
-            df_comm,
-            column_config={
-                "Price": st.column_config.NumberColumn(format="$%.2f"),
-                "Change ($)": st.column_config.NumberColumn(format="$%.2f"),
-                "Change (%)": st.column_config.NumberColumn(format="%+.2f%%"),
-                "9 EMA": st.column_config.NumberColumn(format="$%.2f"),
-                "21 EMA": st.column_config.NumberColumn(format="$%.2f"),
-                "30D Gain": st.column_config.NumberColumn(format="%+.2f%%"),
-                "30-Day Trend": st.column_config.LineChartColumn("30-Day Trend")
-            },
-            hide_index=True,
-            use_container_width=True
-        )
-
-# Sidebar utilities
-st.sidebar.markdown("### Settings")
-if st.sidebar.button("🔄 Force Refresh Quotes"):
-    st.cache_data.clear()
-    st.rerun()
+            comm_html += f"""
+            <tr>
+                <td>{c['group']}</td>
+                <td>{c['benchmark']}</td>
+                <td style="font-weight:600;">{t}</td>
+                <td>{c['name']}</td>
+                <td>{c['leverage']}</td>
+                <td>${d['price']:.2f}</td>
+                <td class="{c_dlr}">{s_dlr}${d['change_dlr']:.2f}</td>
+                <td class="{c_pct}">{s_pct}{d['change_pct']:.2f}%</td>
+                <td>${d['day_low']:.2f} - ${d['day_high']:.2f}</td>
+                <td>${d['ema_9']:.2f}</td>
+                <td>${d['ema_21']:.2f}</td>
+                <td class="{c_30}">{s_30}{d['gain_30']:.2f}%</td>
+                <td>{d['vol']:,}</td>
+                <td>{c['expense']}</td>
+                <td style="text-align:center;">{cue}</td>
+                <td>{spark}</td>
+            </tr>
+            """
+    comm_html += "</tbody></table>"
+    st.markdown(comm_html, unsafe_allow_html=True)
