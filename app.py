@@ -10,16 +10,14 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# SESSION STATE INITIALIZATION
+# SESSION STATE & QUERY PARAMETER SORTING
 # ---------------------------------------------------------
 if "selected_sector" not in st.session_state:
     st.session_state.selected_sector = "Information Technology"
-if "active_tab" not in st.session_state:
-    st.session_state.active_tab = 0
-if "port_sort_col" not in st.session_state:
-    st.session_state.port_sort_col = "mval"
-if "port_sort_asc" not in st.session_state:
-    st.session_state.port_sort_asc = False
+
+params = st.query_params
+port_sort_col = params.get("sort", "mval")
+port_sort_asc = params.get("asc", "false").lower() == "true"
 
 def render_html(html_code):
     clean = "\n".join(line.strip() for line in html_code.splitlines() if line.strip())
@@ -29,7 +27,7 @@ def render_html(html_code):
         st.markdown(clean, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# CLEAN, READABLE HIGH-CONTRAST TERMINAL STYLING
+# STYLING (READABLE INTER/SYSTEM FONT, RESPONSIVE TILES)
 # ---------------------------------------------------------
 css_styling = """
 <style>
@@ -54,13 +52,22 @@ css_styling = """
         background-color: #0F172A;
         color: #F8FAFC;
         font-weight: 700;
-        padding: 6px 8px;
+        padding: 7px 8px;
         border: 1px solid #334155;
         text-align: left;
         white-space: nowrap;
         text-transform: uppercase;
-        letter-spacing: 0.5px;
         font-size: 11px;
+    }
+    .sheet-table th a {
+        color: #F8FAFC !important;
+        text-decoration: none !important;
+        display: block;
+        width: 100%;
+        cursor: pointer;
+    }
+    .sheet-table th a:hover {
+        color: #38BDF8 !important;
     }
     .sheet-table td {
         padding: 5px 8px;
@@ -113,17 +120,20 @@ css_styling = """
         font-size: 10px;
         text-transform: uppercase;
     }
-    /* Compact clickable benchmark tiles */
+    /* Benchmark button tile formatting (prevents cut-off text) */
     div[data-testid="column"] button {
         border-radius: 0px !important;
         border: 1px solid #475569 !important;
         background: #F8FAFC !important;
         color: #0F172A !important;
-        padding: 3px 2px !important;
-        font-size: 10.5px !important;
+        padding: 2px 1px !important;
+        font-size: 10px !important;
         font-weight: 700 !important;
-        line-height: 1.2 !important;
-        min-height: 38px !important;
+        line-height: 1.15 !important;
+        min-height: 48px !important;
+        height: auto !important;
+        white-space: normal !important;
+        word-break: normal !important;
     }
     div[data-testid="column"] button:hover {
         background: #E2E8F0 !important;
@@ -267,7 +277,7 @@ bench_data = fetch_ticker_data(ALL_BENCH_TICKERS)
 # ---------------------------------------------------------
 # 1. TOP INTERACTIVE BENCHMARK RIBBON
 # ---------------------------------------------------------
-st.markdown("#### >> MARKET OVERVIEW // CLICK ANY SECTOR TO INSPECT")
+st.markdown("#### >> MARKET OVERVIEW")
 
 cols = st.columns(len(ALL_BENCH_TICKERS))
 for i, ticker in enumerate(ALL_BENCH_TICKERS):
@@ -282,17 +292,16 @@ for i, ticker in enumerate(ALL_BENCH_TICKERS):
         if ticker in bench_data:
             d = bench_data[ticker]
             sign = "+" if d["change_pct"] >= 0 else ""
-            btn_text = f"{label}\n${d['price']:.2f} [{sign}{d['change_pct']:.2f}%]"
+            btn_text = f"{label}\n${d['price']:.2f}\n{sign}{d['change_pct']:.2f}%"
         else:
-            btn_text = f"{label}\n--"
+            btn_text = f"{label}\n--\n--"
             
         if st.button(btn_text, key=f"bench_btn_{ticker}", use_container_width=True):
             if is_clickable_sector:
                 st.session_state.selected_sector = sec_name
-                st.session_state.active_tab = 1
                 st.rerun()
 
-st.markdown("<div style='height:6px;'></div>", unsafe_allow_html=True)
+st.markdown("<div style='height:4px;'></div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
 # TABS SETUP
@@ -384,7 +393,7 @@ def load_portfolio_holdings():
     return result
 
 # ---------------------------------------------------------
-# TAB 1: PORTFOLIO (WITH INTERACTIVE HEADER SORTING)
+# TAB 1: PORTFOLIO (WITH CLICKABLE TABLE HEADERS)
 # ---------------------------------------------------------
 with tab_portfolio:
     st.markdown("<div class='section-banner'>PORTFOLIO AUDIT // REAL-TIME PERFORMANCE</div>", unsafe_allow_html=True)
@@ -453,41 +462,35 @@ with tab_portfolio:
         
         st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
         
-        # --- Interactive Sort Controls ---
-        st.markdown("<span style='font-size:11px; font-weight:700; color:#475569;'>SORT TABLE BY:</span>", unsafe_allow_html=True)
-        s_cols = st.columns([1, 1, 1, 1, 1.2, 1.2, 1.2, 1.2, 1.2, 3])
-        sort_fields = [
-            ("TICKER", "ticker"),
-            ("SHARES", "shares"),
-            ("AVG COST", "cost"),
-            ("PRICE", "price"),
-            ("MKT VAL", "mval"),
-            ("TDY $", "daily_dlr"),
-            ("TDY %", "daily_pct"),
-            ("TOTAL $", "overall_dlr"),
-            ("TOTAL %", "overall_pct")
-        ]
+        # Sort data according to current query parameter state
+        sort_k = port_sort_col
+        port_rows = sorted(port_rows, key=lambda x: (x.get(sort_k, 0) or 0), reverse=not port_sort_asc)
         
-        for idx, (label, col_key) in enumerate(sort_fields):
-            with s_cols[idx]:
-                arrow = ""
-                if st.session_state.port_sort_col == col_key:
-                    arrow = " ▲" if st.session_state.port_sort_asc else " ▼"
-                if st.button(f"{label}{arrow}", key=f"sort_btn_{col_key}", use_container_width=True):
-                    if st.session_state.port_sort_col == col_key:
-                        st.session_state.port_sort_asc = not st.session_state.port_sort_asc
-                    else:
-                        st.session_state.port_sort_col = col_key
-                        st.session_state.port_sort_asc = False if col_key in ["mval", "daily_dlr", "daily_pct", "overall_dlr", "overall_pct"] else True
-                    st.rerun()
+        # Helper to generate header link with toggled asc/desc state
+        def make_th(label, col_key):
+            is_active = (port_sort_col == col_key)
+            next_asc = "false" if (is_active and port_sort_asc) else "true"
+            indicator = ""
+            if is_active:
+                indicator = " ▲" if port_sort_asc else " ▼"
+            return f'<th><a href="?sort={col_key}&asc={next_asc}" target="_self">{label}{indicator}</a></th>'
 
-        # Apply Sort
-        sort_k = st.session_state.port_sort_col
-        port_rows = sorted(port_rows, key=lambda x: (x.get(sort_k, 0) or 0), reverse=not st.session_state.port_sort_asc)
-        
-        # Render Table
+        # Render Table with clickable header hyperlinks
         port_html = '<div style="overflow-x: auto; margin-bottom: 20px;">'
-        port_html += '<table class="sheet-table"><thead><tr><th>TICKER</th><th>ASSET NAME</th><th>SHARES</th><th>AVG COST</th><th>MARK PRICE</th><th>MARKET VALUE</th><th>TODAY ($)</th><th>TODAY (%)</th><th>UNREALIZED ($)</th><th>UNREALIZED (%)</th><th style="text-align:center;">SIGNAL</th><th style="text-align:center;">30D TREND</th></tr></thead><tbody>'
+        port_html += '<table class="sheet-table"><thead><tr>'
+        port_html += make_th("TICKER", "ticker")
+        port_html += '<th>ASSET NAME</th>'
+        port_html += make_th("SHARES", "shares")
+        port_html += make_th("AVG COST", "cost")
+        port_html += make_th("MARK PRICE", "price")
+        port_html += make_th("MARKET VALUE", "mval")
+        port_html += make_th("TODAY ($)", "daily_dlr")
+        port_html += make_th("TODAY (%)", "daily_pct")
+        port_html += make_th("UNREALIZED ($)", "overall_dlr")
+        port_html += make_th("UNREALIZED (%)", "overall_pct")
+        port_html += '<th style="text-align:center;">SIGNAL</th>'
+        port_html += '<th style="text-align:center;">30D TREND</th>'
+        port_html += '</tr></thead><tbody>'
         
         for r in port_rows:
             c_daily = "pos-cell" if r["daily_dlr"] >= 0 else "neg-cell"
@@ -560,7 +563,6 @@ SECTOR_DATASETS = {
 with tab_sector:
     col_sel, col_note = st.columns([1, 3])
     with col_sel:
-        # Defaults to sector picked from ribbon
         sector_list = list(SECTOR_DATASETS.keys())
         default_idx = sector_list.index(st.session_state.selected_sector) if st.session_state.selected_sector in sector_list else 0
         selected_sector = st.selectbox("SELECT SECTOR BENCHMARK", sector_list, index=default_idx)
@@ -637,7 +639,7 @@ with tab_sector:
 # ---------------------------------------------------------
 COMMODITIES_REGISTRY = [
     {"group": "Crude Oil", "benchmark": "WTI Light Sweet Crude", "ticker": "USO", "name": "United States Oil Fund LP", "leverage": "1x Spot / Front-Month", "expense": "0.60%"},
-    {"group": "Crude Oil", "benchmark": "Bloomberg WTI Crude Subindex", "ticker": "UCO", "name": "ProShares Ultra Bloomberg Crude", "leverage": "2x Daily Leveraged Long", "expense": "0.95%"},
+    {"group": "Crude Oil", "benchmark": "Bloomberg WTI Crude Subindex", "ticker": "UCO", "name": "ProShares Ultra Bloomberg Crude", "leverage": "2x Leveraged Long", "expense": "0.95%"},
     {"group": "Crude Oil", "benchmark": "Bloomberg WTI Crude Subindex", "ticker": "SCO", "name": "ProShares UltraShort Bloomberg Crude", "leverage": "-2x Leveraged Inverse", "expense": "0.95%"},
     {"group": "Crude Oil", "benchmark": "WTI Crude Futures (12-Month)", "ticker": "USL", "name": "United States 12 Month Oil Fund", "leverage": "1x 12-Month Strip Curve", "expense": "0.90%"},
     {"group": "Crude Oil", "benchmark": "ICE Brent Crude Futures", "ticker": "BNO", "name": "United States Brent Oil Fund LP", "leverage": "1x Front-Month Brent", "expense": "1.02%"},
@@ -645,7 +647,7 @@ COMMODITIES_REGISTRY = [
     {"group": "Refined Products", "benchmark": "DBIQ Optimum Yield Energy", "ticker": "DBE", "name": "Invesco DB Energy Fund", "leverage": "1x Multi-Fuel & Heating Oil", "expense": "0.77%"},
     {"group": "Refined Products", "benchmark": "MVIS Global Oil Refiners", "ticker": "CRAK", "name": "VanEck Oil Refiners ETF", "leverage": "1x Crack Spread Refiners", "expense": "0.60%"},
     {"group": "Natural Gas", "benchmark": "Henry Hub Natural Gas", "ticker": "UNG", "name": "United States Natural Gas Fund", "leverage": "1x Front-Month Nat Gas", "expense": "1.06%"},
-    {"group": "Natural Gas", "benchmark": "Bloomberg Nat Gas Subindex", "ticker": "BOIL", "name": "ProShares Ultra Bloomberg Nat Gas", "leverage": "2x Daily Leveraged Long", "expense": "0.95%"},
+    {"group": "Natural Gas", "benchmark": "Bloomberg Nat Gas Subindex", "ticker": "BOIL", "name": "ProShares Ultra Bloomberg Nat Gas", "leverage": "2x Leveraged Long", "expense": "0.95%"},
     {"group": "Natural Gas", "benchmark": "Bloomberg Nat Gas Subindex", "ticker": "KOLD", "name": "ProShares UltraShort Nat Gas", "leverage": "-2x Leveraged Inverse", "expense": "0.95%"},
     {"group": "Biofuels", "benchmark": "CBOT Corn Futures", "ticker": "CORN", "name": "Teucrium Corn Fund", "leverage": "1x Ethanol Feedstock", "expense": "0.26%"},
     {"group": "Biofuels", "benchmark": "US Ethanol Production", "ticker": "GPRE", "name": "Green Plains Inc.", "leverage": "1x Pure Ethanol Refiner", "expense": "Operating"},
