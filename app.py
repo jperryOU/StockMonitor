@@ -19,48 +19,6 @@ if "theme_choice" not in st.session_state:
     st.session_state.theme_choice = "Slate (Balanced)"
 
 THEMES = {
-    "Light (Classic)": {
-        "body_bg": "#FFFFFF",
-        "text_color": "#0F172A",
-        "sidebar_bg": "#F8FAFC",
-        "sidebar_border": "#CBD5E1",
-        "card_bg": "#F8FAFC",
-        "card_border": "#475569",
-        "card_hover": "#E2E8F0",
-        "banner_bg": "#1E293B",
-        "banner_text": "#F8FAFC",
-        "banner_border": "#0F172A",
-        "th_bg": "#0F172A",
-        "th_text": "#F8FAFC",
-        "th_hover": "#1E293B",
-        "table_bg": "#FFFFFF",
-        "table_border": "#334155",
-        "td_border": "#CBD5E1",
-        "td_text": "#0F172A",
-        "tr_hover": "#F1F5F9",
-        "pos_bg": "#DCFCE7",
-        "pos_text": "#14532D",
-        "neg_bg": "#FEE2E2",
-        "neg_text": "#7F1D1D",
-        "badge_bull_bg": "#15803D",
-        "badge_bull_text": "#FFFFFF",
-        "badge_bear_bg": "#B91C1C",
-        "badge_bear_text": "#FFFFFF",
-        "tab_bg": "#E2E8F0",
-        "tab_text": "#0F172A",
-        "tab_active_bg": "#0F172A",
-        "tab_active_text": "#FFFFFF",
-        "metric_bg": "#F8FAFC",
-        "metric_border": "#475569",
-        "metric_label": "#475569",
-        "metric_val": "#0F172A",
-        "plotly_plot_bg": "#F8FAFC",
-        "plotly_paper_bg": "#FFFFFF",
-        "plotly_grid": "#E2E8F0",
-        "plotly_line": "#475569",
-        "spark_pos": "#15803D",
-        "spark_neg": "#B91C1C"
-    },
     "Slate (Balanced)": {
         "body_bg": "#1E293B",
         "text_color": "#F8FAFC",
@@ -144,6 +102,48 @@ THEMES = {
         "plotly_line": "#4B5563",
         "spark_pos": "#10B981",
         "spark_neg": "#EF4444"
+    },
+    "Light (Classic)": {
+        "body_bg": "#FFFFFF",
+        "text_color": "#0F172A",
+        "sidebar_bg": "#F8FAFC",
+        "sidebar_border": "#CBD5E1",
+        "card_bg": "#F8FAFC",
+        "card_border": "#475569",
+        "card_hover": "#E2E8F0",
+        "banner_bg": "#1E293B",
+        "banner_text": "#F8FAFC",
+        "banner_border": "#0F172A",
+        "th_bg": "#0F172A",
+        "th_text": "#F8FAFC",
+        "th_hover": "#1E293B",
+        "table_bg": "#FFFFFF",
+        "table_border": "#334155",
+        "td_border": "#CBD5E1",
+        "td_text": "#0F172A",
+        "tr_hover": "#F1F5F9",
+        "pos_bg": "#DCFCE7",
+        "pos_text": "#14532D",
+        "neg_bg": "#FEE2E2",
+        "neg_text": "#7F1D1D",
+        "badge_bull_bg": "#15803D",
+        "badge_bull_text": "#FFFFFF",
+        "badge_bear_bg": "#B91C1C",
+        "badge_bear_text": "#FFFFFF",
+        "tab_bg": "#E2E8F0",
+        "tab_text": "#0F172A",
+        "tab_active_bg": "#0F172A",
+        "tab_active_text": "#FFFFFF",
+        "metric_bg": "#F8FAFC",
+        "metric_border": "#475569",
+        "metric_label": "#475569",
+        "metric_val": "#0F172A",
+        "plotly_plot_bg": "#F8FAFC",
+        "plotly_paper_bg": "#FFFFFF",
+        "plotly_grid": "#E2E8F0",
+        "plotly_line": "#475569",
+        "spark_pos": "#15803D",
+        "spark_neg": "#B91C1C"
     }
 }
 
@@ -174,7 +174,7 @@ def render_html(html_code):
         st.markdown(clean, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# DYNAMIC THEMED CSS (NO EMOJIS, SHARP RECTANGLES)
+# DYNAMIC THEMED CSS (STRICT RECTANGULAR, NO EMOJIS)
 # ---------------------------------------------------------
 css_styling = f"""
 <style>
@@ -190,7 +190,7 @@ css_styling = f"""
         font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif !important;
         background-color: {thm['body_bg']} !important;
     }}
-    /* Target sidebar explicitly so text and container contrast properly */
+    /* Sidebar Structure & Background */
     section[data-testid="stSidebar"] {{
         background-color: {thm['sidebar_bg']} !important;
         border-right: 1px solid {thm['sidebar_border']} !important;
@@ -198,11 +198,54 @@ css_styling = f"""
     section[data-testid="stSidebar"] * {{
         color: {thm['text_color']} !important;
     }}
-    section[data-testid="stSidebar"] div[data-baseweb="select"] > div {{
+    
+    /* COMPLETE FIX FOR WHITE SELECTBOX (SIDEBAR & MAIN BODY) */
+    .stSelectbox div[data-baseweb="select"],
+    .stSelectbox div[data-baseweb="select"] > div,
+    .stSelectbox div[data-baseweb="select"] div,
+    .stSelectbox div[data-baseweb="select"] span {{
         background-color: {thm['card_bg']} !important;
+        color: {thm['text_color']} !important;
         border-color: {thm['card_border']} !important;
+        border-radius: 0px !important;
+    }}
+    .stSelectbox div[data-baseweb="select"] svg {{
+        fill: {thm['text_color']} !important;
         color: {thm['text_color']} !important;
     }}
+    div[data-baseweb="popover"],
+    div[data-baseweb="popover"] > div,
+    div[data-baseweb="popover"] ul,
+    div[data-baseweb="popover"] li {{
+        background-color: {thm['card_bg']} !important;
+        color: {thm['text_color']} !important;
+        border-color: {thm['card_border']} !important;
+    }}
+    div[data-baseweb="popover"] li:hover {{
+        background-color: {thm['card_hover']} !important;
+    }}
+
+    /* Sidebar Button Styling */
+    section[data-testid="stSidebar"] div[data-testid="stButton"] {{
+        margin-top: 12px !important;
+    }}
+    section[data-testid="stSidebar"] div[data-testid="stButton"] > button {{
+        background-color: {thm['card_bg']} !important;
+        color: {thm['text_color']} !important;
+        border: 1px solid {thm['card_border']} !important;
+        border-radius: 0px !important;
+        font-size: 11px !important;
+        font-weight: 700 !important;
+        letter-spacing: 0.5px !important;
+        padding: 8px 12px !important;
+        width: 100% !important;
+    }}
+    section[data-testid="stSidebar"] div[data-testid="stButton"] > button:hover {{
+        background-color: {thm['card_hover']} !important;
+        border-color: {thm['banner_text']} !important;
+    }}
+
+    /* Clean Terminal Typography */
     h1, h2, h3, h4, h5, h6, p, span, label {{
         color: {thm['text_color']} !important;
         font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif !important;
@@ -288,8 +331,9 @@ css_styling = f"""
         font-size: 10px;
         text-transform: uppercase;
     }}
-    /* Robust Ribbon Button Styler (Prevents white box & text clipping) */
-    div[data-testid="stButton"] > button {{
+
+    /* Ribbon Button Styler - PREVENTS TRUNCATION (...) & FORCES 2 LINES */
+    div[data-testid="column"] div[data-testid="stButton"] > button {{
         border-radius: 0px !important;
         border: 1px solid {thm['card_border']} !important;
         background-color: {thm['card_bg']} !important;
@@ -298,24 +342,30 @@ css_styling = f"""
         min-height: 42px !important;
         height: auto !important;
         width: 100% !important;
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: center !important;
+        justify-content: center !important;
     }}
-    div[data-testid="stButton"] > button:hover {{
+    div[data-testid="column"] div[data-testid="stButton"] > button:hover {{
         background-color: {thm['card_hover']} !important;
         border-color: {thm['banner_text']} !important;
     }}
-    div[data-testid="stButton"] > button p,
-    div[data-testid="stButton"] > button div {{
+    div[data-testid="column"] div[data-testid="stButton"] > button p,
+    div[data-testid="column"] div[data-testid="stButton"] > button div {{
         color: {thm['text_color']} !important;
-        white-space: pre-wrap !important;
-        word-break: break-word !important;
+        white-space: pre-line !important;
+        word-break: normal !important;
         text-overflow: clip !important;
         overflow: visible !important;
         font-size: 9.5px !important;
         font-weight: 700 !important;
         line-height: 1.15 !important;
+        text-align: center !important;
         margin: 0 !important;
         padding: 0 !important;
     }}
+
     .stTabs [data-baseweb="tab"] {{
         border-radius: 0px !important;
         font-weight: 700;
@@ -351,7 +401,7 @@ css_styling = f"""
 render_html(css_styling)
 
 # ---------------------------------------------------------
-# CACHED DATA FETCHER (FUNDAMENTALS + ADVANCED TECHNICALS)
+# CACHED DATA FETCHER
 # ---------------------------------------------------------
 @st.cache_data(ttl=300)
 def fetch_ticker_data(tickers):
@@ -517,7 +567,7 @@ for i, ticker in enumerate(ALL_BENCH_TICKERS):
 st.markdown("<div style='height:4px;'></div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# TABS SETUP (ZERO EMOJIS)
+# TABS SETUP
 # ---------------------------------------------------------
 tab_portfolio, tab_sector, tab_scatter, tab_commodities, tab_glossary = st.tabs([
     "PORTFOLIO POSITIONS",
