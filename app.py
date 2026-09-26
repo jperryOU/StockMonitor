@@ -16,12 +16,14 @@ st.set_page_config(
 if "selected_sector" not in st.session_state:
     st.session_state.selected_sector = "Information Technology"
 if "theme_choice" not in st.session_state:
-    st.session_state.theme_choice = "Light (Classic)"
+    st.session_state.theme_choice = "Slate (Balanced)"
 
 THEMES = {
     "Light (Classic)": {
         "body_bg": "#FFFFFF",
         "text_color": "#0F172A",
+        "sidebar_bg": "#F8FAFC",
+        "sidebar_border": "#CBD5E1",
         "card_bg": "#F8FAFC",
         "card_border": "#475569",
         "card_hover": "#E2E8F0",
@@ -62,6 +64,8 @@ THEMES = {
     "Slate (Balanced)": {
         "body_bg": "#1E293B",
         "text_color": "#F8FAFC",
+        "sidebar_bg": "#0F172A",
+        "sidebar_border": "#334155",
         "card_bg": "#334155",
         "card_border": "#64748B",
         "card_hover": "#475569",
@@ -102,6 +106,8 @@ THEMES = {
     "Dark (Terminal)": {
         "body_bg": "#090D16",
         "text_color": "#F3F4F6",
+        "sidebar_bg": "#030712",
+        "sidebar_border": "#1F2937",
         "card_bg": "#111827",
         "card_border": "#374151",
         "card_hover": "#1F2937",
@@ -183,6 +189,19 @@ css_styling = f"""
         padding-right: 1.5rem !important;
         font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif !important;
         background-color: {thm['body_bg']} !important;
+    }}
+    /* Target sidebar explicitly so text and container contrast properly */
+    section[data-testid="stSidebar"] {{
+        background-color: {thm['sidebar_bg']} !important;
+        border-right: 1px solid {thm['sidebar_border']} !important;
+    }}
+    section[data-testid="stSidebar"] * {{
+        color: {thm['text_color']} !important;
+    }}
+    section[data-testid="stSidebar"] div[data-baseweb="select"] > div {{
+        background-color: {thm['card_bg']} !important;
+        border-color: {thm['card_border']} !important;
+        color: {thm['text_color']} !important;
     }}
     h1, h2, h3, h4, h5, h6, p, span, label {{
         color: {thm['text_color']} !important;
@@ -269,23 +288,33 @@ css_styling = f"""
         font-size: 10px;
         text-transform: uppercase;
     }}
-    div[data-testid="column"] button {{
+    /* Robust Ribbon Button Styler (Prevents white box & text clipping) */
+    div[data-testid="stButton"] > button {{
         border-radius: 0px !important;
         border: 1px solid {thm['card_border']} !important;
-        background: {thm['card_bg']} !important;
+        background-color: {thm['card_bg']} !important;
         color: {thm['text_color']} !important;
-        padding: 4px 1px !important;
-        font-size: 10px !important;
-        font-weight: 700 !important;
-        line-height: 1.25 !important;
-        min-height: 40px !important;
+        padding: 3px 1px !important;
+        min-height: 42px !important;
         height: auto !important;
+        width: 100% !important;
+    }}
+    div[data-testid="stButton"] > button:hover {{
+        background-color: {thm['card_hover']} !important;
+        border-color: {thm['banner_text']} !important;
+    }}
+    div[data-testid="stButton"] > button p,
+    div[data-testid="stButton"] > button div {{
+        color: {thm['text_color']} !important;
         white-space: pre-wrap !important;
         word-break: break-word !important;
-    }}
-    div[data-testid="column"] button:hover {{
-        background: {thm['card_hover']} !important;
-        border-color: {thm['banner_text']} !important;
+        text-overflow: clip !important;
+        overflow: visible !important;
+        font-size: 9.5px !important;
+        font-weight: 700 !important;
+        line-height: 1.15 !important;
+        margin: 0 !important;
+        padding: 0 !important;
     }}
     .stTabs [data-baseweb="tab"] {{
         border-radius: 0px !important;
@@ -448,8 +477,8 @@ SECTOR_MAP = {
 }
 
 BENCHMARKS_EXTRA = [
-    ("SPY", "S&P 500"),
-    ("QQQ", "NASDAQ"),
+    ("SPY", "S&P"),
+    ("QQQ", "NDX"),
     ("DIA", "DOW")
 ]
 
@@ -476,7 +505,7 @@ for i, ticker in enumerate(ALL_BENCH_TICKERS):
         if ticker in bench_data:
             d = bench_data[ticker]
             sign = "+" if d["change_pct"] >= 0 else ""
-            btn_text = f"{label}\n{ticker} {sign}{d['change_pct']:.2f}%"
+            btn_text = f"{label}\n{ticker} {sign}{d['change_pct']:.1f}%"
         else:
             btn_text = f"{label}\n{ticker} --"
             
@@ -918,17 +947,16 @@ with tab_sector:
 # TAB 3: MOMENTUM SCATTER MATRIX (DESCRIPTIVE DROPDOWNS)
 # ---------------------------------------------------------
 METRIC_REGISTRY = {
-    # Label displayed in dropdown with helper context : DataFrame Column Name
-    "Daily Gain (%) (Today's percentage return)": "Daily Gain (%)",
+    "Daily Gain (%) (Today's percentage price change)": "Daily Gain (%)",
     "30D Gain (%) (Trailing 22-session momentum return)": "30D Gain (%)",
     "RS vs SPY Alpha (%) (Compares stock return directly against SPY)": "RS vs SPY Alpha (%)",
     "14D RSI (Momentum oscillator: >70 overbought, <30 oversold)": "14D RSI",
-    "50D SMA Spread (%) (% distance above/below institutional 50-day average)": "50D SMA Spread (%)",
-    "RVOL (Volume Multiplier) (Today's volume relative to 20-day historical average)": "RVOL (Volume Multiplier)",
+    "50D SMA Spread (%) (% distance above/below 50-day moving average)": "50D SMA Spread (%)",
+    "RVOL (Today's volume vs 20-day average; >1.5x is heavy)": "RVOL (Volume Multiplier)",
     "Forward P/E (Price-to-earnings based on next 12M expected EPS)": "Forward P/E",
     "Trailing P/E (Price-to-earnings based on past 12M actual net earnings)": "Trailing P/E",
-    "PEG Ratio (P/E divided by growth rate; < 1.0 indicates undervalued growth)": "PEG Ratio",
-    "Beta (Risk) (Market volatility sensitivity; S&P 500 = 1.0)": "Beta (Risk)",
+    "PEG Ratio (P/E divided by growth rate; <1.0 is undervalued)": "PEG Ratio",
+    "Beta (Market volatility sensitivity; S&P 500 = 1.0)": "Beta (Risk)",
     "Market Cap (Total corporate equity valuation size)": "Market Cap",
     "Dividend Yield (%) (Annual cash dividend divided by share price)": "Dividend Yield (%)"
 }
@@ -945,7 +973,7 @@ with tab_scatter:
     x_opts = [
         "30D Gain (%) (Trailing 22-session momentum return)",
         "RS vs SPY Alpha (%) (Compares stock return directly against SPY)",
-        "50D SMA Spread (%) (% distance above/below institutional 50-day average)",
+        "50D SMA Spread (%) (% distance above/below 50-day moving average)",
         "14D RSI (Momentum oscillator: >70 overbought, <30 oversold)"
     ]
     with col_x:
@@ -953,24 +981,25 @@ with tab_scatter:
         x_col = METRIC_REGISTRY[x_label]
 
     y_opts = [
-        "Daily Gain (%) (Today's percentage return)",
+        "Daily Gain (%) (Today's percentage price change)",
         "14D RSI (Momentum oscillator: >70 overbought, <30 oversold)",
-        "50D SMA Spread (%) (% distance above/below institutional 50-day average)",
-        "RVOL (Volume Multiplier) (Today's volume relative to 20-day historical average)"
+        "50D SMA Spread (%) (% distance above/below 50-day moving average)",
+        "RVOL (Today's volume vs 20-day average; >1.5x is heavy)"
     ]
     with col_y:
         y_label = st.selectbox("Y-AXIS (VELOCITY)", y_opts, index=0)
         y_col = METRIC_REGISTRY[y_label]
 
     color_opts = [
-        "Daily Gain (%) (Today's percentage return)",
+        "Daily Gain (%) (Today's percentage price change)",
+        "RS vs SPY Alpha (%) (Compares stock return directly against SPY)",
         "14D RSI (Momentum oscillator: >70 overbought, <30 oversold)",
-        "50D SMA Spread (%) (% distance above/below institutional 50-day average)",
-        "RVOL (Volume Multiplier) (Today's volume relative to 20-day historical average)",
+        "50D SMA Spread (%) (% distance above/below 50-day moving average)",
+        "RVOL (Today's volume vs 20-day average; >1.5x is heavy)",
         "Forward P/E (Price-to-earnings based on next 12M expected EPS)",
         "Trailing P/E (Price-to-earnings based on past 12M actual net earnings)",
-        "PEG Ratio (P/E divided by growth rate; < 1.0 indicates undervalued growth)",
-        "Beta (Risk) (Market volatility sensitivity; S&P 500 = 1.0)"
+        "PEG Ratio (P/E divided by growth rate; <1.0 is undervalued)",
+        "Beta (Market volatility sensitivity; S&P 500 = 1.0)"
     ]
     with col_color:
         color_label = st.selectbox("COLOR DIMENSION", color_opts, index=0)
@@ -978,7 +1007,7 @@ with tab_scatter:
 
     size_opts = [
         "Market Cap (Total corporate equity valuation size)",
-        "RVOL (Volume Multiplier) (Today's volume relative to 20-day historical average)",
+        "RVOL (Today's volume vs 20-day average; >1.5x is heavy)",
         "Dividend Yield (%) (Annual cash dividend divided by share price)"
     ]
     with col_size:
@@ -1014,7 +1043,7 @@ with tab_scatter:
     if plot_rows:
         df_plot = pd.DataFrame(plot_rows)
 
-        if color_col in ["Daily Gain (%)", "50D SMA Spread (%)"]:
+        if color_col in ["Daily Gain (%)", "50D SMA Spread (%)", "RS vs SPY Alpha (%)"]:
             color_scale = [thm["spark_neg"], "#64748B", thm["spark_pos"]]
             c_mid = 0.0
         elif color_col == "14D RSI":
