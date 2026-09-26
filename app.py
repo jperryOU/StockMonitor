@@ -9,7 +9,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Helper function to prevent Markdown from interpreting indented HTML as code
 def render_html(html_code):
     clean = "\n".join(line.strip() for line in html_code.splitlines() if line.strip())
     if hasattr(st, "html"):
@@ -25,8 +24,8 @@ css_styling = """
     .block-container {
         padding-top: 4.5rem !important;
         padding-bottom: 2rem !important;
-        padding-left: 2rem !important;
-        padding-right: 2rem !important;
+        padding-left: 1.5rem !important;
+        padding-right: 1.5rem !important;
     }
     .benchmark-container {
         display: flex;
@@ -35,8 +34,8 @@ css_styling = """
         margin-bottom: 16px;
     }
     .bench-card {
-        flex: 1 1 115px;
-        min-width: 110px;
+        flex: 1 1 110px;
+        min-width: 105px;
         border: 1px solid #D0D7DE;
         background: #FFFFFF;
         text-align: center;
@@ -71,13 +70,13 @@ css_styling = """
         background-color: #1A365D;
         color: #FFFFFF;
         font-weight: 600;
-        padding: 5px 8px;
+        padding: 6px 8px;
         border: 1px solid #2D3748;
         text-align: left;
         white-space: nowrap;
     }
     .sheet-table td {
-        padding: 4.5px 8px;
+        padding: 5px 8px;
         border: 1px solid #E1E4E8;
         color: #24292F;
         white-space: nowrap;
@@ -89,7 +88,7 @@ css_styling = """
         background-color: #0C2340;
         color: #FFFFFF;
         font-weight: bold;
-        font-size: 12px;
+        font-size: 11.5px;
         letter-spacing: 0.5px;
         padding: 7px 10px;
         border-top-left-radius: 3px;
@@ -100,18 +99,18 @@ css_styling = """
     .pos-cell {
         background-color: #E6F4EA !important;
         color: #137333 !important;
-        font-weight: 500;
+        font-weight: 600;
     }
     .neg-cell {
         background-color: #FCE8E6 !important;
         color: #C5221F !important;
-        font-weight: 500;
+        font-weight: 600;
     }
     .bullish-badge {
         background-color: #E6F4EA;
         color: #137333;
         font-weight: 600;
-        padding: 1px 5px;
+        padding: 2px 6px;
         border-radius: 3px;
         display: inline-block;
     }
@@ -119,7 +118,7 @@ css_styling = """
         background-color: #FCE8E6;
         color: #C5221F;
         font-weight: 600;
-        padding: 1px 5px;
+        padding: 2px 6px;
         border-radius: 3px;
         display: inline-block;
     }
@@ -138,7 +137,7 @@ def fetch_ticker_data(tickers):
             ticker = t.strip().upper()
             stock = yf.Ticker(ticker)
             df = stock.history(period="3mo")
-            if df.empty or len(df) < 21:
+            if df.empty or len(df) < 5:
                 continue
             
             close = df["Close"].dropna()
@@ -157,6 +156,9 @@ def fetch_ticker_data(tickers):
             pe_ratio = info.get("trailingPE", None)
             short_name = info.get("shortName", ticker)
 
+            # Clean list of floats for SVG generator
+            clean_spark = [float(p) for p in hist_30.tolist() if not pd.isna(p)]
+
             data_dict[ticker] = {
                 "name": short_name,
                 "price": float(close.iloc[-1]),
@@ -170,16 +172,16 @@ def fetch_ticker_data(tickers):
                 "vol": int(volume.iloc[-1]),
                 "market_cap": market_cap,
                 "pe_ratio": pe_ratio,
-                "sparkline": hist_30.tolist(),
-                "bullish": bool(ema_9.iloc[-1] > ema_21.iloc[-1])
+                "sparkline": clean_spark,
+                "bullish": bool(ema_9.iloc[-1] >= ema_21.iloc[-1])
             }
         except Exception:
             continue
     return data_dict
 
-def make_svg_sparkline(prices, is_positive=True, width=100, height=20):
+def make_svg_sparkline(prices, is_positive=True, width=90, height=20):
     if not prices or len(prices) < 2:
-        return ""
+        return '<span style="color:#A0AEC0; font-size:10px;">--</span>'
     min_p, max_p = min(prices), max(prices)
     rng = max_p - min_p if max_p != min_p else 1.0
     pts = []
@@ -261,9 +263,7 @@ def load_portfolio_holdings():
     
     symbol_col = next((c for c in df.columns if "symbol" in c), None)
     qty_col = next((c for c in df.columns if "quantity" in c or "qty" in c or "shares" in c), None)
-    
-    # Correctly identify average per-share cost vs. total cost basis
-    avg_cost_col = next((c for c in df.columns if "average cost" in c or "avg cost" in c or "cost/share" in c), None)
+    avg_cost_col = next((c for c in df.columns if "average cost" in c or "avg cost" in c), None)
     total_cost_col = next((c for c in df.columns if "cost basis total" in c or "total cost" in c), None)
 
     if not symbol_col:
@@ -287,7 +287,6 @@ def load_portfolio_holdings():
             if qty <= 0:
                 continue
 
-            # Prioritize extracting average per-share cost directly
             cost = 0.0
             if avg_cost_col:
                 cost_raw = str(row.get(avg_cost_col, "0")).replace("$", "").replace(",", "").strip()
@@ -306,7 +305,6 @@ def load_portfolio_holdings():
         except Exception:
             continue
             
-    # Aggregate multiple lots of the same symbol (e.g. Cash & Margin VOO lots)
     agg_holdings = {}
     for h in holdings:
         t = h["ticker"]
@@ -328,10 +326,8 @@ def load_portfolio_holdings():
 
 with tab_portfolio:
     st.markdown("<div class='section-banner'>PORTFOLIO HOLDINGS & REAL-TIME PERFORMANCE</div>", unsafe_allow_html=True)
-    
     portfolio_holdings = load_portfolio_holdings()
     
-    # Fallback if no CSV found
     if not portfolio_holdings:
         portfolio_holdings = [
             {"ticker": "NVDA", "shares": 50, "cost": 115.50},
@@ -360,13 +356,9 @@ with tab_portfolio:
             market_value = shares * price
             total_market_value += market_value
             
-            # Daily Return
-            daily_change_dlr_per_share = d["change_dlr"]
-            position_daily_gain_dlr = daily_change_dlr_per_share * shares
+            position_daily_gain_dlr = d["change_dlr"] * shares
             total_daily_gain_dlr += position_daily_gain_dlr
-            daily_change_pct = d["change_pct"]
             
-            # Overall Gain / Loss
             overall_gain_dlr = market_value - cost_basis
             overall_gain_pct = (overall_gain_dlr / cost_basis) * 100 if cost_basis > 0 else 0.0
             
@@ -378,7 +370,7 @@ with tab_portfolio:
                 "price": price,
                 "mval": market_value,
                 "daily_dlr": position_daily_gain_dlr,
-                "daily_pct": daily_change_pct,
+                "daily_pct": d["change_pct"],
                 "overall_dlr": overall_gain_dlr,
                 "overall_pct": overall_gain_pct,
                 "bullish": d["bullish"],
@@ -388,9 +380,9 @@ with tab_portfolio:
     if port_rows:
         total_overall_gain_dlr = total_market_value - total_cost_basis
         total_overall_gain_pct = (total_overall_gain_dlr / total_cost_basis) * 100 if total_cost_basis > 0 else 0.0
-        total_daily_pct = (total_daily_gain_dlr / (total_market_value - total_daily_gain_dlr)) * 100 if (total_market_value - total_daily_gain_dlr) > 0 else 0.0
+        prev_close_val = total_market_value - total_daily_gain_dlr
+        total_daily_pct = (total_daily_gain_dlr / prev_close_val) * 100 if prev_close_val > 0 else 0.0
         
-        # Summary KPI Metrics Cards
         k1, k2, k3, k4 = st.columns(4)
         k1.metric("Total Portfolio Value", f"${total_market_value:,.2f}")
         k2.metric("Daily Return", f"${total_daily_gain_dlr:+,.2f}", f"{total_daily_pct:+.2f}%")
@@ -399,9 +391,8 @@ with tab_portfolio:
         
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # Render Portfolio Table
         port_html = '<div style="overflow-x: auto; margin-bottom: 20px;">'
-        port_html += '<table class="sheet-table"><thead><tr><th>Ticker</th><th>Company Name</th><th>Shares</th><th>Avg Cost</th><th>Current Price</th><th>Market Value</th><th>Daily Gain ($)</th><th>Daily Gain (%)</th><th>Overall Gain ($)</th><th>Overall Gain (%)</th><th>Momentum</th><th>30-Day Trend</th></tr></thead><tbody>'
+        port_html += '<table class="sheet-table"><thead><tr><th>Ticker</th><th>Company Name</th><th>Shares</th><th>Avg Cost</th><th>Current Price</th><th>Market Value</th><th>Daily Gain ($)</th><th>Daily Gain (%)</th><th>Overall Gain ($)</th><th>Overall Gain (%)</th><th>Momentum</th><th style="text-align:center;">30-Day Trend</th></tr></thead><tbody>'
         
         for r in port_rows:
             c_daily = "pos-cell" if r["daily_dlr"] >= 0 else "neg-cell"
@@ -414,7 +405,7 @@ with tab_portfolio:
             cue = '<span class="bullish-badge">▲ Bullish</span>' if r["bullish"] else '<span class="bearish-badge">▼ Bearish</span>'
             spark = make_svg_sparkline(r["sparkline"], is_positive=(r["overall_dlr"] >= 0))
             
-            port_html += f'<tr><td style="font-weight:600;">{r["ticker"]}</td><td>{r["name"]}</td><td>{r["shares"]:,}</td><td>${r["cost"]:.2f}</td><td>${r["price"]:.2f}</td><td>${r["mval"]:,.2f}</td><td class="{c_daily}">{s_daily_dlr}${r["daily_dlr"]:,.2f}</td><td class="{c_daily}">{s_daily_pct}{r["daily_pct"]:.2f}%</td><td class="{c_overall}">{s_overall_dlr}${r["overall_dlr"]:,.2f}</td><td class="{c_overall}">{s_overall_pct}{r["overall_pct"]:.2f}%</td><td style="text-align:center;">{cue}</td><td>{spark}</td></tr>'
+            port_html += f'<tr><td style="font-weight:600;">{r["ticker"]}</td><td>{r["name"]}</td><td>{r["shares"]:,}</td><td>${r["cost"]:.2f}</td><td>${r["price"]:.2f}</td><td>${r["mval"]:,.2f}</td><td class="{c_daily}">{s_daily_dlr}${r["daily_dlr"]:,.2f}</td><td class="{c_daily}">{s_daily_pct}{r["daily_pct"]:.2f}%</td><td class="{c_overall}">{s_overall_dlr}${r["overall_dlr"]:,.2f}</td><td class="{c_overall}">{s_overall_pct}{r["overall_pct"]:.2f}%</td><td style="text-align:center;">{cue}</td><td style="text-align:center;">{spark}</td></tr>'
         
         port_html += '</tbody></table></div>'
         render_html(port_html)
@@ -422,41 +413,52 @@ with tab_portfolio:
         st.info("No portfolio data available.")
 
 # ---------------------------------------------------------
-# 2. ACTIVE SECTOR EXPLORER TAB
+# 2. FULL GICS SECTOR CONSTITUENTS (TOP 20+ PER SECTOR)
 # ---------------------------------------------------------
 SECTOR_DATASETS = {
+    "Communication Services": [
+        "GOOGL", "GOOG", "META", "NFLX", "DIS", "TMUS", "VZ", "T", "CMCSA", "CHTR",
+        "WBD", "EA", "TTWO", "OMC", "IPG", "FOXA", "FOX", "NWSA", "NWS", "LYV", "SPOT", "DASH", "PINS", "ROKU"
+    ],
     "Information Technology": [
-        "AAPL", "NVDA", "MSFT", "AVGO", "ORCL", "CRM", "AMD", "QCOM", "ADBE", "INTC", "TXN", "MU", "CRDO", "MRVL"
+        "MSFT", "AAPL", "NVDA", "AVGO", "ORCL", "CRM", "AMD", "QCOM", "ADBE", "CSCO",
+        "ACN", "TXN", "INTU", "NOW", "AMAT", "MU", "ADI", "LRCX", "KLAC", "PANW", "SNPS", "CDNS", "MRVL"
     ],
     "Health Care": [
-        "LLY", "UNH", "JNJ", "ABBV", "MRK", "TMO", "ABT", "PFE", "AMGN", "DHR", "BMY", "ISRG"
+        "LLY", "UNH", "JNJ", "ABBV", "MRK", "TMO", "ABT", "ISRG", "PFE", "DHR",
+        "BMY", "AMGN", "GILD", "VRTX", "MDT", "SYK", "ELV", "BSX", "CI", "REGN", "BDX", "ZTS"
     ],
     "Financials": [
-        "JPM", "V", "MA", "BAC", "WFC", "MS", "GS", "BLK", "C", "AXP", "SCHW", "PGR"
+        "BRK-B", "JPM", "V", "MA", "BAC", "WFC", "MS", "GS", "SPGI", "BLK",
+        "C", "PGR", "CB", "MMC", "AXP", "SCHW", "AON", "ICE", "MCO", "USB", "PNC", "TRV"
     ],
     "Consumer Discretionary": [
-        "AMZN", "TSLA", "HD", "MCD", "NKE", "SBUX", "LOW", "BKNG", "TJX", "TGT", "MAR", "CMG"
-    ],
-    "Communication Services": [
-        "GOOGL", "META", "NFLX", "VZ", "DIS", "TMUS", "T", "SPOT", "DASH", "CMCSA", "WBD", "EA"
+        "AMZN", "TSLA", "HD", "MCD", "NKE", "LOW", "BKNG", "SBUX", "TJX", "TGT",
+        "LULU", "MAR", "HLT", "ORLY", "AZO", "CMG", "ROST", "YUM", "EBAY", "DRI", "EXPE"
     ],
     "Industrials": [
-        "GE", "CAT", "RTX", "UNP", "HON", "UPS", "BA", "DE", "LMT", "GEV", "ETN", "WM"
+        "GE", "CAT", "RTX", "UNP", "HON", "BA", "DE", "LMT", "UPS", "ETN",
+        "GEV", "WM", "ITW", "GD", "NSC", "CSX", "PH", "EMR", "PCAR", "FDX", "TT", "CARR"
     ],
     "Consumer Staples": [
-        "WMT", "PG", "COST", "KO", "PEP", "PM", "MO", "MDLZ", "CL", "TGT", "GIS", "SYY"
+        "WMT", "PG", "COST", "KO", "PEP", "PM", "MDLZ", "MO", "CL", "KMB",
+        "GIS", "STZ", "SYY", "ADM", "KDP", "HSY", "KR", "EL", "CAG", "CHD", "MKC"
     ],
     "Energy": [
-        "XOM", "CVX", "COP", "SLB", "EOG", "MPC", "PSX", "VLO", "OXY", "KMI", "WMB"
+        "XOM", "CVX", "COP", "SLB", "EOG", "MPC", "PSX", "VLO", "OXY", "HES",
+        "KMI", "WMB", "BKR", "HAL", "DVN", "OKE", "FANG", "TRGP", "CTRA", "MRO", "EQT"
     ],
     "Real Estate": [
-        "PLD", "AMT", "EQIX", "SPG", "O", "WELL", "PSA", "VICI", "CCI", "DLR", "SBAC", "EXR"
+        "PLD", "AMT", "EQIX", "WELL", "PSA", "SPG", "O", "CCI", "DLR", "VICI",
+        "EXR", "AVB", "EQR", "CBRE", "SBAC", "WY", "IRM", "INVH", "MAA", "ESS", "KIM"
     ],
     "Materials": [
-        "LIN", "SHW", "FCX", "APD", "NEM", "ECL", "CTVA", "DOW", "PPG", "MLM", "VMC", "CF"
+        "LIN", "SHW", "FCX", "ECL", "APD", "NEM", "CTVA", "DOW", "PPG", "MLM",
+        "VMC", "CF", "FMC", "ALB", "IFF", "PKG", "IP", "BALL", "NUE", "STLD"
     ],
     "Utilities": [
-        "NEE", "SO", "DUK", "CEG", "SRE", "AEP", "PCG", "XEL", "ED", "PEG", "ETR", "FE"
+        "NEE", "SO", "DUK", "CEG", "SRE", "AEP", "PCG", "XEL", "ED", "PEG",
+        "ETR", "WEC", "D", "FE", "PPL", "ES", "AEE", "CMS", "CNP", "DTE", "NI"
     ]
 }
 
@@ -465,7 +467,7 @@ with tab_sector:
     with col_sel:
         selected_sector = st.selectbox("Select Sector", list(SECTOR_DATASETS.keys()), index=0)
     with col_note:
-        st.markdown("<p style='font-size:12px; color:#57606A; margin-top:28px;'>• Showing Top 20 Market Cap Leaders & Top 10 30-Day Gainers</p>", unsafe_allow_html=True)
+        st.markdown("<p style='font-size:12px; color:#57606A; margin-top:28px;'>• Top 20 Market Cap Leaders & Top 10 30-Day Gainers</p>", unsafe_allow_html=True)
 
     sector_tickers = SECTOR_DATASETS[selected_sector]
     sec_data = fetch_ticker_data(sector_tickers)
@@ -492,12 +494,12 @@ with tab_sector:
     if rows:
         col_l, col_r = st.columns(2)
 
-        # 1. TOP MARKET CAP LEADERS
+        # 1. TOP 20 MARKET CAP LEADERS
         with col_l:
-            sorted_mcap = sorted(rows, key=lambda x: (x["mcap"] or 0), reverse=True)
+            sorted_mcap = sorted(rows, key=lambda x: (x["mcap"] or 0), reverse=True)[:20]
             tbl_html = '<div style="overflow-x: auto; margin-bottom: 20px;">'
-            tbl_html += '<div class="section-banner">TOP 20 MARKET CAP LEADERS</div>'
-            tbl_html += '<table class="sheet-table"><thead><tr><th>Ticker</th><th>Company Name</th><th>Price</th><th>Change ($)</th><th>Change (%)</th><th>30D Gain</th><th>Market Cap</th><th>P/E</th><th>Momentum</th><th>30-Day Trend</th></tr></thead><tbody>'
+            tbl_html += f'<div class="section-banner">TOP {len(sorted_mcap)} MARKET CAP LEADERS</div>'
+            tbl_html += '<table class="sheet-table"><thead><tr><th>Ticker</th><th>Company Name</th><th>Price</th><th>Today ($)</th><th>Today (%)</th><th>30D Gain</th><th>Market Cap</th><th>P/E</th><th>Momentum</th><th style="text-align:center;">30D Trend</th></tr></thead><tbody>'
             for r in sorted_mcap:
                 c_dlr = "pos-cell" if r["chg_dlr"] >= 0 else "neg-cell"
                 c_pct = "pos-cell" if r["chg_pct"] >= 0 else "neg-cell"
@@ -508,16 +510,16 @@ with tab_sector:
                 cue = '<span class="bullish-badge">▲ Bullish</span>' if r["bullish"] else '<span class="bearish-badge">▼ Bearish</span>'
                 spark = make_svg_sparkline(r["sparkline"], is_positive=(r["gain_30"] >= 0))
 
-                tbl_html += f'<tr><td style="font-weight:600;">{r["ticker"]}</td><td style="max-width:120px; overflow:hidden; text-overflow:ellipsis;">{r["name"]}</td><td>${r["price"]:.2f}</td><td class="{c_dlr}">{s_dlr}${r["chg_dlr"]:.2f}</td><td class="{c_pct}">{s_pct}{r["chg_pct"]:.2f}%</td><td class="{c_30}">{s_30}{r["gain_30"]:.2f}%</td><td>{r["mcap_fmt"]}</td><td>{r["pe"]}</td><td style="text-align:center;">{cue}</td><td>{spark}</td></tr>'
+                tbl_html += f'<tr><td style="font-weight:600;">{r["ticker"]}</td><td style="max-width:110px; overflow:hidden; text-overflow:ellipsis;">{r["name"]}</td><td>${r["price"]:.2f}</td><td class="{c_dlr}">{s_dlr}${r["chg_dlr"]:.2f}</td><td class="{c_pct}">{s_pct}{r["chg_pct"]:.2f}%</td><td class="{c_30}">{s_30}{r["gain_30"]:.2f}%</td><td>{r["mcap_fmt"]}</td><td>{r["pe"]}</td><td style="text-align:center;">{cue}</td><td style="text-align:center;">{spark}</td></tr>'
             tbl_html += '</tbody></table></div>'
             render_html(tbl_html)
 
-        # 2. TOP 10 MOMENTUM LEADERS
+        # 2. TOP 10 MOMENTUM LEADERS (30-DAY GAINERS)
         with col_r:
             sorted_mom = sorted(rows, key=lambda x: x["gain_30"], reverse=True)[:10]
             tbl_html2 = '<div style="overflow-x: auto; margin-bottom: 20px;">'
             tbl_html2 += '<div class="section-banner">TOP 10 30-DAY GAINERS (MOMENTUM LEADERS)</div>'
-            tbl_html2 += '<table class="sheet-table"><thead><tr><th>Ticker</th><th>Company Name</th><th>Price</th><th>30D Gain</th><th>Today Change</th><th>Market Cap</th><th>Momentum</th><th>30-Day Trend</th></tr></thead><tbody>'
+            tbl_html2 += '<table class="sheet-table"><thead><tr><th>Ticker</th><th>Company Name</th><th>Price</th><th>30D Gain</th><th>Today Change</th><th>Market Cap</th><th>Momentum</th><th style="text-align:center;">30D Trend</th></tr></thead><tbody>'
             for r in sorted_mom:
                 c_pct = "pos-cell" if r["chg_pct"] >= 0 else "neg-cell"
                 c_30 = "pos-cell" if r["gain_30"] >= 0 else "neg-cell"
@@ -526,7 +528,7 @@ with tab_sector:
                 cue = '<span class="bullish-badge">▲ Bullish</span>' if r["bullish"] else '<span class="bearish-badge">▼ Bearish</span>'
                 spark = make_svg_sparkline(r["sparkline"], is_positive=(r["gain_30"] >= 0))
 
-                tbl_html2 += f'<tr><td style="font-weight:600;">{r["ticker"]}</td><td style="max-width:120px; overflow:hidden; text-overflow:ellipsis;">{r["name"]}</td><td>${r["price"]:.2f}</td><td class="{c_30}">{s_30}{r["gain_30"]:.2f}%</td><td class="{c_pct}">{s_pct}{r["chg_pct"]:.2f}%</td><td>{r["mcap_fmt"]}</td><td style="text-align:center;">{cue}</td><td>{spark}</td></tr>'
+                tbl_html2 += f'<tr><td style="font-weight:600;">{r["ticker"]}</td><td style="max-width:120px; overflow:hidden; text-overflow:ellipsis;">{r["name"]}</td><td>${r["price"]:.2f}</td><td class="{c_30}">{s_30}{r["gain_30"]:.2f}%</td><td class="{c_pct}">{s_pct}{r["chg_pct"]:.2f}%</td><td>{r["mcap_fmt"]}</td><td style="text-align:center;">{cue}</td><td style="text-align:center;">{spark}</td></tr>'
             tbl_html2 += '</tbody></table></div>'
             render_html(tbl_html2)
 
@@ -561,7 +563,7 @@ with tab_commodities:
 
     comm_html = '<div style="overflow-x: auto; margin-top: 10px;">'
     comm_html += '<div class="section-banner">COMMODITY & DERIVATIVE FUTURES (ENERGY, METALS, AG & LEVERAGED FUNDS)</div>'
-    comm_html += '<table class="sheet-table"><thead><tr><th>Commodity Group</th><th>Underlying Benchmark</th><th>Ticker</th><th>Fund Name</th><th>Exposure / Leverage</th><th>Current Price</th><th>Change ($)</th><th>Change (%)</th><th>Day Range</th><th>9 EMA</th><th>21 EMA</th><th>30D Gain</th><th>Volume</th><th>Expense</th><th>Momentum</th><th>30-Day Trend</th></tr></thead><tbody>'
+    comm_html += '<table class="sheet-table"><thead><tr><th>Commodity Group</th><th>Underlying Benchmark</th><th>Ticker</th><th>Fund Name</th><th>Exposure / Leverage</th><th>Current Price</th><th>Today ($)</th><th>Today (%)</th><th>Day Range</th><th>9 EMA</th><th>21 EMA</th><th>30D Gain</th><th>Volume</th><th>Expense</th><th>Momentum</th><th style="text-align:center;">30D Trend</th></tr></thead><tbody>'
     
     for c in COMMODITIES_REGISTRY:
         t = c["ticker"]
@@ -576,7 +578,7 @@ with tab_commodities:
             cue = '<span class="bullish-badge">▲ Bullish</span>' if d["bullish"] else '<span class="bearish-badge">▼ Bearish</span>'
             spark = make_svg_sparkline(d["sparkline"], is_positive=(d["gain_30"] >= 0))
 
-            comm_html += f'<tr><td>{c["group"]}</td><td>{c["benchmark"]}</td><td style="font-weight:600;">{t}</td><td>{c["name"]}</td><td>{c["leverage"]}</td><td>${d["price"]:.2f}</td><td class="{c_dlr}">{s_dlr}${d["change_dlr"]:.2f}</td><td class="{c_pct}">{s_pct}{d["change_pct"]:.2f}%</td><td>${d["day_low"]:.2f} - ${d["day_high"]:.2f}</td><td>${d["ema_9"]:.2f}</td><td>${d["ema_21"]:.2f}</td><td class="{c_30}">{s_30}{d["gain_30"]:.2f}%</td><td>{d["vol"]:,}</td><td>{c["expense"]}</td><td style="text-align:center;">{cue}</td><td>{spark}</td></tr>'
+            comm_html += f'<tr><td>{c["group"]}</td><td>{c["benchmark"]}</td><td style="font-weight:600;">{t}</td><td>{c["name"]}</td><td>{c["leverage"]}</td><td>${d["price"]:.2f}</td><td class="{c_dlr}">{s_dlr}${d["change_dlr"]:.2f}</td><td class="{c_pct}">{s_pct}{d["change_pct"]:.2f}%</td><td>${d["day_low"]:.2f} - ${d["day_high"]:.2f}</td><td>${d["ema_9"]:.2f}</td><td>${d["ema_21"]:.2f}</td><td class="{c_30}">{s_30}{d["gain_30"]:.2f}%</td><td>{d["vol"]:,}</td><td>{c["expense"]}</td><td style="text-align:center;">{cue}</td><td style="text-align:center;">{spark}</td></tr>'
     comm_html += '</tbody></table></div>'
     render_html(comm_html)
 
