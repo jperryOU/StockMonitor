@@ -243,21 +243,38 @@ render_html(bench_html)
 tab_sector, tab_commodities = st.tabs(["📊 ACTIVE SECTOR EXPLORER", "🛢️ COMMODITY & DERIVATIVE FUTURES"])
 
 SECTOR_DATASETS = {
-    "Communication Services": [
-        "GOOGL", "META", "NFLX", "VZ", "DIS", "TMUS", "T", "SPOT", 
-        "DASH", "CMCSA", "WBD", "LYV", "TTWO", "FOXA", "OMN", "CHTR", "PINS", "MTCH", "SNAP", "EA"
-    ],
-    "Technology": [
+    "Information Technology": [
         "AAPL", "NVDA", "MSFT", "AVGO", "ORCL", "CRM", "AMD", "QCOM", "ADBE", "INTC", "TXN", "MU", "CRDO", "MRVL"
+    ],
+    "Health Care": [
+        "LLY", "UNH", "JNJ", "ABBV", "MRK", "TMO", "ABT", "PFE", "AMGN", "DHR", "BMY", "ISRG"
     ],
     "Financials": [
         "JPM", "V", "MA", "BAC", "WFC", "MS", "GS", "BLK", "C", "AXP", "SCHW", "PGR"
     ],
+    "Consumer Discretionary": [
+        "AMZN", "TSLA", "HD", "MCD", "NKE", "SBUX", "LOW", "BKNG", "TJX", "TGT", "MAR", "CMG"
+    ],
+    "Communication Services": [
+        "GOOGL", "META", "NFLX", "VZ", "DIS", "TMUS", "T", "SPOT", "DASH", "CMCSA", "WBD", "EA"
+    ],
+    "Industrials": [
+        "GE", "CAT", "RTX", "UNP", "HON", "UPS", "BA", "DE", "LMT", "GEV", "ETN", "WM"
+    ],
+    "Consumer Staples": [
+        "WMT", "PG", "COST", "KO", "PEP", "PM", "MO", "MDLZ", "CL", "TGT", "GIS", "SYY"
+    ],
     "Energy": [
         "XOM", "CVX", "COP", "SLB", "EOG", "MPC", "PSX", "VLO", "OXY", "KMI", "WMB"
     ],
-    "Healthcare": [
-        "LLY", "UNH", "JNJ", "ABBV", "MRK", "TMO", "ABT", "PFE", "AMGN", "DHR", "BMY", "ISRG"
+    "Real Estate": [
+        "PLD", "AMT", "EQIX", "SPG", "O", "WELL", "PSA", "VICI", "CCI", "DLR", "SBAC", "EXR"
+    ],
+    "Materials": [
+        "LIN", "SHW", "FCX", "APD", "NEM", "ECL", "CTVA", "DOW", "PPG", "MLM", "VMC", "CF"
+    ],
+    "Utilities": [
+        "NEE", "SO", "DUK", "CEG", "SRE", "AEP", "PCG", "XEL", "ED", "PEG", "ETR", "FE"
     ]
 }
 
