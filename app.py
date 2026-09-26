@@ -3,6 +3,8 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.express as px
+import requests
+import io
 
 st.set_page_config(
     page_title="SECTOR INTELLIGENCE & MOMENTUM TERMINAL",
@@ -190,7 +192,6 @@ css_styling = f"""
         font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif !important;
         background-color: {thm['body_bg']} !important;
     }}
-    /* Sidebar Structure & Background */
     section[data-testid="stSidebar"] {{
         background-color: {thm['sidebar_bg']} !important;
         border-right: 1px solid {thm['sidebar_border']} !important;
@@ -199,7 +200,7 @@ css_styling = f"""
         color: {thm['text_color']} !important;
     }}
     
-    /* UNIVERSAL FIX FOR SELECTBOXES (SIDEBAR & MAIN BODY) */
+    /* FIX FOR SELECTBOXES */
     div[data-testid="stSelectbox"] div[data-baseweb="select"],
     div[data-testid="stSelectbox"] div[data-baseweb="select"] > div,
     div[data-baseweb="select"],
@@ -337,7 +338,7 @@ css_styling = f"""
         text-transform: uppercase;
     }}
 
-    /* RIBBON BUTTON STYLER - PREVENTS WHITE BOX & TRUNCATION (...) */
+    /* Ribbon Button Styler */
     div[data-testid*="olumn"] div[data-testid="stButton"] > button,
     div[data-testid="stButton"] > button {{
         border-radius: 0px !important;
@@ -410,7 +411,79 @@ css_styling = f"""
 render_html(css_styling)
 
 # ---------------------------------------------------------
-# CACHED DATA FETCHER
+# DYNAMIC S&P 500 CONSTITUENT SCRAPER (LIVE MARKET UNIVERSE)
+# ---------------------------------------------------------
+@st.cache_data(ttl=43200)  # Refreshes every 12 hours
+def get_live_sp500_sectors():
+    url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+    }
+    try:
+        resp = requests.get(url, headers=headers, timeout=10)
+        tables = pd.read_html(io.StringIO(resp.text))
+        df = tables[0]
+        df["Symbol"] = df["Symbol"].str.replace(".", "-", regex=False)
+        sector_dict = {}
+        for sector, group in df.groupby("GICS Sector"):
+            sector_dict[sector] = group["Symbol"].tolist()
+        return sector_dict
+    except Exception:
+        # Fallback if network blocks Wikipedia table
+        return {
+            "Information Technology": ["AAPL", "MSFT", "NVDA", "AVGO", "ORCL", "CRM", "AMD", "QCOM", "ADBE", "CSCO", "ACN", "TXN", "INTU", "NOW", "AMAT", "MU", "ADI", "LRCX", "KLAC", "PANW", "SNPS", "CDNS", "MRVL"],
+            "Health Care": ["LLY", "UNH", "JNJ", "ABBV", "MRK", "TMO", "ABT", "ISRG", "PFE", "DHR", "BMY", "AMGN", "GILD", "VRTX", "MDT", "SYK", "ELV", "BSX", "CI", "REGN", "BDX", "ZTS"],
+            "Financials": ["BRK-B", "JPM", "V", "MA", "BAC", "WFC", "MS", "GS", "SPGI", "BLK", "C", "PGR", "CB", "MMC", "AXP", "SCHW", "AON", "ICE", "MCO", "USB", "PNC", "TRV"],
+            "Consumer Discretionary": ["AMZN", "TSLA", "HD", "MCD", "NKE", "LOW", "BKNG", "SBUX", "TJX", "TGT", "LULU", "MAR", "HLT", "ORLY", "AZO", "CMG", "ROST", "YUM", "EBAY", "DRI", "EXPE"],
+            "Communication Services": ["GOOGL", "GOOG", "META", "NFLX", "DIS", "TMUS", "VZ", "T", "CMCSA", "CHTR", "WBD", "EA", "TTWO", "OMC", "IPG", "FOXA", "FOX", "NWSA", "NWS", "LYV", "SPOT", "DASH", "PINS", "ROKU"],
+            "Industrials": ["GE", "CAT", "RTX", "UNP", "HON", "BA", "DE", "LMT", "UPS", "ETN", "GEV", "WM", "ITW", "GD", "NSC", "CSX", "PH", "EMR", "PCAR", "FDX", "TT", "CARR"],
+            "Consumer Staples": ["WMT", "PG", "COST", "KO", "PEP", "PM", "MDLZ", "MO", "CL", "KMB", "GIS", "STZ", "SYY", "ADM", "KDP", "HSY", "KR", "EL", "CAG", "CHD", "MKC"],
+            "Energy": ["XOM", "CVX", "COP", "SLB", "EOG", "MPC", "PSX", "VLO", "OXY", "HES", "KMI", "WMB", "BKR", "HAL", "DVN", "OKE", "FANG", "TRGP", "CTRA", "MRO", "EQT"],
+            "Real Estate": ["PLD", "AMT", "EQIX", "WELL", "PSA", "SPG", "O", "CCI", "DLR", "VICI", "EXR", "AVB", "EQR", "CBRE", "SBAC", "WY", "IRM", "INVH", "MAA", "ESS", "KIM"],
+            "Materials": ["LIN", "SHW", "FCX", "ECL", "APD", "NEM", "CTVA", "DOW", "PPG", "MLM", "VMC", "CF", "FMC", "ALB", "IFF", "PKG", "IP", "BALL", "NUE", "STLD"],
+            "Utilities": ["NEE", "SO", "DUK", "CEG", "SRE", "AEP", "PCG", "XEL", "ED", "PEG", "ETR", "WEC", "D", "FE", "PPL", "ES", "AEE", "CMS", "CNP", "DTE", "NI"]
+        }
+
+SECTOR_DATASETS = get_live_sp500_sectors()
+
+# ---------------------------------------------------------
+# LIVE MOVERS SCREENER (FAST BATCH EVALUATION)
+# ---------------------------------------------------------
+@st.cache_data(ttl=300)
+def rank_live_sector_stocks(sector_tickers, mode="Top Movers Today (Largest % Swings)"):
+    if mode == "Standard Index Order" or len(sector_tickers) <= 1:
+        return sector_tickers
+    try:
+        data = yf.download(sector_tickers, period="5d", progress=False, group_by="ticker")
+        scored = []
+        for t in sector_tickers:
+            try:
+                sub = data[t] if len(sector_tickers) > 1 else data
+                close = sub["Close"].dropna()
+                vol = sub["Volume"].dropna()
+                if len(close) < 2:
+                    continue
+                chg = float((close.iloc[-1] - close.iloc[-2]) / close.iloc[-2] * 100)
+                v_today = float(vol.iloc[-1]) if len(vol) > 0 else 0
+                scored.append({"ticker": t, "abs_chg": abs(chg), "chg": chg, "vol": v_today})
+            except Exception:
+                continue
+
+        if mode == "Top Movers Today (Largest % Swings)":
+            scored = sorted(scored, key=lambda x: x["abs_chg"], reverse=True)
+        elif mode == "Top Gainers Today":
+            scored = sorted(scored, key=lambda x: x["chg"], reverse=True)
+        elif mode == "Top Losers Today":
+            scored = sorted(scored, key=lambda x: x["chg"])
+        elif mode == "Highest Volume Today":
+            scored = sorted(scored, key=lambda x: x["vol"], reverse=True)
+
+        return [s["ticker"] for s in scored]
+    except Exception:
+        return sector_tickers
+
+# ---------------------------------------------------------
+# CACHED DETAILED DATA FETCHER
 # ---------------------------------------------------------
 @st.cache_data(ttl=300)
 def fetch_ticker_data(tickers):
@@ -519,7 +592,7 @@ def fmt_mcap(val):
     return f"${val / 1e6:.2f}M"
 
 # ---------------------------------------------------------
-# SECTOR REGISTRY
+# SECTOR REGISTRY & TOP RIBBON
 # ---------------------------------------------------------
 SECTOR_MAP = {
     "XLK": ("Information Technology", "TECH"),
@@ -545,9 +618,6 @@ ALL_BENCH_TICKERS = list(SECTOR_MAP.keys()) + [b[0] for b in BENCHMARKS_EXTRA]
 bench_data = fetch_ticker_data(ALL_BENCH_TICKERS)
 spy_gain_30 = bench_data.get("SPY", {}).get("gain_30", 0.0)
 
-# ---------------------------------------------------------
-# 1. TOP INTERACTIVE BENCHMARK RIBBON
-# ---------------------------------------------------------
 st.markdown("#### >> MARKET OVERVIEW")
 
 cols = st.columns(len(ALL_BENCH_TICKERS))
@@ -602,7 +672,6 @@ def load_portfolio_holdings():
         return []
         
     df.columns = [str(c).strip().lower() for c in df.columns]
-    
     symbol_col = next((c for c in df.columns if "symbol" in c), None)
     qty_col = next((c for c in df.columns if "quantity" in c or "qty" in c or "shares" in c), None)
     avg_cost_col = next((c for c in df.columns if "average cost" in c or "avg cost" in c), None)
@@ -614,15 +683,12 @@ def load_portfolio_holdings():
     holdings = []
     for _, row in df.iterrows():
         symbol = str(row.get(symbol_col, "")).strip().upper()
-        
         if not symbol or symbol in ["NAN", "NONE", ""] or any(
             symbol.startswith(prefix) for prefix in ["PENDING", "THE DATA", "BROKERAGE", "DATE", "ACCOUNT"]
         ):
             continue
-        
         if "**" in symbol or symbol in ["SPAXX", "FDRXX", "FCASH"]:
             continue
-        
         try:
             qty_raw = str(row.get(qty_col, 0)).replace(",", "").strip() if qty_col else "0"
             qty = float(qty_raw) if qty_raw not in ["nan", "None", "--", "n/a", ""] else 0.0
@@ -639,11 +705,7 @@ def load_portfolio_holdings():
                 if tot_raw not in ["nan", "None", "--", "n/a", "", "null"]:
                     cost = float(tot_raw) / qty
 
-            holdings.append({
-                "ticker": symbol,
-                "shares": qty,
-                "cost": cost
-            })
+            holdings.append({"ticker": symbol, "shares": qty, "cost": cost})
         except Exception:
             continue
             
@@ -659,11 +721,7 @@ def load_portfolio_holdings():
     result = []
     for t, item in agg_holdings.items():
         avg_c = item["total_cost"] / item["shares"] if item["shares"] > 0 else 0.0
-        result.append({
-            "ticker": t,
-            "shares": round(item["shares"], 4),
-            "cost": avg_c
-        })
+        result.append({"ticker": t, "shares": round(item["shares"], 4), "cost": avg_c})
     return result
 
 # ---------------------------------------------------------
@@ -759,7 +817,6 @@ with tab_portfolio:
             </thead>
             <tbody>
         """
-        
         for r in port_rows:
             c_daily = "pos-cell" if r["daily_dlr"] >= 0 else "neg-cell"
             c_overall = "pos-cell" if r["overall_dlr"] >= 0 else "neg-cell"
@@ -767,7 +824,6 @@ with tab_portfolio:
             s_daily_pct = "+" if r["daily_pct"] >= 0 else ""
             s_overall_dlr = "+" if r["overall_dlr"] >= 0 else ""
             s_overall_pct = "+" if r["overall_pct"] >= 0 else ""
-            
             cue = '<span class="bullish-badge">BULL</span>' if r["bullish"] else '<span class="bearish-badge">BEAR</span>'
             spark = make_svg_sparkline(r["sparkline"], is_positive=(r["overall_dlr"] >= 0))
             
@@ -787,7 +843,6 @@ with tab_portfolio:
                 <td style="text-align:center;">{spark}</td>
             </tr>
             """
-        
         port_html += """
             </tbody>
         </table>
@@ -799,21 +854,16 @@ with tab_portfolio:
             const tbody = table.querySelector("tbody");
             const rows = Array.from(tbody.querySelectorAll("tr"));
             const th = table.querySelectorAll("th")[colIdx];
-            
             const isAsc = th.getAttribute("data-sort") === "asc";
             const dir = isAsc ? -1 : 1;
-            
             table.querySelectorAll("th .arrow").forEach(el => el.textContent = "");
             th.querySelector(".arrow").textContent = isAsc ? " ▼" : " ▲";
             th.setAttribute("data-sort", isAsc ? "desc" : "asc");
-            
             rows.sort((a, b) => {
                 const cellA = a.children[colIdx].getAttribute("data-val");
                 const cellB = b.children[colIdx].getAttribute("data-val");
                 if (type === 'num') {
-                    const numA = parseFloat(cellA) || 0;
-                    const numB = parseFloat(cellB) || 0;
-                    return (numA - numB) * dir;
+                    return ((parseFloat(cellA) || 0) - (parseFloat(cellB) || 0)) * dir;
                 } else {
                     return cellA.localeCompare(cellB) * dir;
                 }
@@ -827,57 +877,7 @@ with tab_portfolio:
         st.info("NO PORTFOLIO POSITIONS AVAILABLE.")
 
 # ---------------------------------------------------------
-# SECTOR DATASETS
-# ---------------------------------------------------------
-SECTOR_DATASETS = {
-    "Information Technology": [
-        "MSFT", "AAPL", "NVDA", "AVGO", "ORCL", "CRM", "AMD", "QCOM", "ADBE", "CSCO",
-        "ACN", "TXN", "INTU", "NOW", "AMAT", "MU", "ADI", "LRCX", "KLAC", "PANW", "SNPS", "CDNS", "MRVL"
-    ],
-    "Health Care": [
-        "LLY", "UNH", "JNJ", "ABBV", "MRK", "TMO", "ABT", "ISRG", "PFE", "DHR",
-        "BMY", "AMGN", "GILD", "VRTX", "MDT", "SYK", "ELV", "BSX", "CI", "REGN", "BDX", "ZTS"
-    ],
-    "Financials": [
-        "BRK-B", "JPM", "V", "MA", "BAC", "WFC", "MS", "GS", "SPGI", "BLK",
-        "C", "PGR", "CB", "MMC", "AXP", "SCHW", "AON", "ICE", "MCO", "USB", "PNC", "TRV"
-    ],
-    "Consumer Discretionary": [
-        "AMZN", "TSLA", "HD", "MCD", "NKE", "LOW", "BKNG", "SBUX", "TJX", "TGT",
-        "LULU", "MAR", "HLT", "ORLY", "AZO", "CMG", "ROST", "YUM", "EBAY", "DRI", "EXPE"
-    ],
-    "Communication Services": [
-        "GOOGL", "GOOG", "META", "NFLX", "DIS", "TMUS", "VZ", "T", "CMCSA", "CHTR",
-        "WBD", "EA", "TTWO", "OMC", "IPG", "FOXA", "FOX", "NWSA", "NWS", "LYV", "SPOT", "DASH", "PINS", "ROKU"
-    ],
-    "Industrials": [
-        "GE", "CAT", "RTX", "UNP", "HON", "BA", "DE", "LMT", "UPS", "ETN",
-        "GEV", "WM", "ITW", "GD", "NSC", "CSX", "PH", "EMR", "PCAR", "FDX", "TT", "CARR"
-    ],
-    "Consumer Staples": [
-        "WMT", "PG", "COST", "KO", "PEP", "PM", "MDLZ", "MO", "CL", "KMB",
-        "GIS", "STZ", "SYY", "ADM", "KDP", "HSY", "KR", "EL", "CAG", "CHD", "MKC"
-    ],
-    "Energy": [
-        "XOM", "CVX", "COP", "SLB", "EOG", "MPC", "PSX", "VLO", "OXY", "HES",
-        "KMI", "WMB", "BKR", "HAL", "DVN", "OKE", "FANG", "TRGP", "CTRA", "MRO", "EQT"
-    ],
-    "Real Estate": [
-        "PLD", "AMT", "EQIX", "WELL", "PSA", "SPG", "O", "CCI", "DLR", "VICI",
-        "EXR", "AVB", "EQR", "CBRE", "SBAC", "WY", "IRM", "INVH", "MAA", "ESS", "KIM"
-    ],
-    "Materials": [
-        "LIN", "SHW", "FCX", "ECL", "APD", "NEM", "CTVA", "DOW", "PPG", "MLM",
-        "VMC", "CF", "FMC", "ALB", "IFF", "PKG", "IP", "BALL", "NUE", "STLD"
-    ],
-    "Utilities": [
-        "NEE", "SO", "DUK", "CEG", "SRE", "AEP", "PCG", "XEL", "ED", "PEG",
-        "ETR", "WEC", "D", "FE", "PPL", "ES", "AEE", "CMS", "CNP", "DTE", "NI"
-    ]
-}
-
-# ---------------------------------------------------------
-# TAB 2: SECTOR EXPLORER (WITH CATEGORIZED TOGGLES)
+# TAB 2: SECTOR EXPLORER (DYNAMIC S&P 500 CONSTITUENTS)
 # ---------------------------------------------------------
 with tab_sector:
     col_sel, col_tgl_f, col_tgl_t = st.columns([1.5, 1, 1.2])
@@ -895,7 +895,7 @@ with tab_sector:
         st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
         show_technicals = st.toggle("Advanced Technicals (14D RSI, 50D Spread, RVOL, RS vs SPY)", value=False)
 
-    sector_tickers = SECTOR_DATASETS[selected_sector]
+    sector_tickers = SECTOR_DATASETS[selected_sector][:25]
     sec_data = fetch_ticker_data(sector_tickers)
 
     rows = []
@@ -944,31 +944,25 @@ with tab_sector:
             if show_technicals:
                 rsi_val = f'{r["rsi"]:.1f}' if r["rsi"] is not None else '--'
                 c_rsi = 'neg-cell' if (r["rsi"] and r["rsi"] >= 70) else ('pos-cell' if (r["rsi"] and r["rsi"] <= 30) else '')
-                
                 if r["sma_50_dist"] is not None:
                     c_50 = "pos-cell" if r["sma_50_dist"] >= 0 else "neg-cell"
                     s_50 = "+" if r["sma_50_dist"] >= 0 else ""
                     v_50 = f'{s_50}{r["sma_50_dist"]:.1f}%'
                 else:
                     c_50, v_50 = "", "--"
-                    
                 rvol_val = f'{r["rvol"]:.2f}x' if r["rvol"] is not None else '--'
                 c_rvol = 'pos-cell' if (r["rvol"] and r["rvol"] >= 1.5) else ''
-                
                 c_rs = "pos-cell" if r["rs_spy"] >= 0 else "neg-cell"
                 s_rs = "+" if r["rs_spy"] >= 0 else ""
                 v_rs = f'{s_rs}{r["rs_spy"]:.1f}%'
-
                 html += f'<td class="{c_rsi}">{rsi_val}</td><td class="{c_50}">{v_50}</td><td class="{c_rvol}">{rvol_val}</td><td class="{c_rs}">{v_rs}</td>'
             return html
 
-        # 1. TOP MARKET CAP LEADERS
         with col_l:
             sorted_mcap = sorted(rows, key=lambda x: (x["mcap"] or 0), reverse=True)[:20]
             tbl_html = '<div style="overflow-x: auto; margin-bottom: 20px;">'
             tbl_html += f'<div class="section-banner">MARKET CAP CONSTITUENTS [TOP {len(sorted_mcap)}]</div>'
             tbl_html += f'<table class="sheet-table"><thead><tr><th>TICKER</th><th>ASSET NAME</th><th>PRICE</th><th>TODAY ($)</th><th>TODAY (%)</th><th>30D (%)</th><th>CAP</th><th>P/E</th>{build_extra_th()}<th>SIGNAL</th><th style="text-align:center;">30D TREND</th></tr></thead><tbody>'
-            
             for r in sorted_mcap:
                 c_dlr = "pos-cell" if r["chg_dlr"] >= 0 else "neg-cell"
                 c_pct = "pos-cell" if r["chg_pct"] >= 0 else "neg-cell"
@@ -978,18 +972,15 @@ with tab_sector:
                 s_30 = "+" if r["gain_30"] >= 0 else ""
                 cue = '<span class="bullish-badge">BULL</span>' if r["bullish"] else '<span class="bearish-badge">BEAR</span>'
                 spark = make_svg_sparkline(r["sparkline"], is_positive=(r["gain_30"] >= 0))
-
                 tbl_html += f'<tr><td style="font-weight:700;">{r["ticker"]}</td><td style="max-width:110px; overflow:hidden; text-overflow:ellipsis;">{r["name"]}</td><td>${r["price"]:.2f}</td><td class="{c_dlr}">{s_dlr}${r["chg_dlr"]:.2f}</td><td class="{c_pct}">{s_pct}{r["chg_pct"]:.2f}%</td><td class="{c_30}">{s_30}{r["gain_30"]:.2f}%</td><td>{r["mcap_fmt"]}</td><td>{r["pe"]}</td>{build_extra_td(r)}<td style="text-align:center;">{cue}</td><td style="text-align:center;">{spark}</td></tr>'
             tbl_html += '</tbody></table></div>'
             render_html(tbl_html)
 
-        # 2. TOP 10 MOMENTUM LEADERS (30-DAY GAINERS)
         with col_r:
             sorted_mom = sorted(rows, key=lambda x: x["gain_30"], reverse=True)[:10]
             tbl_html2 = '<div style="overflow-x: auto; margin-bottom: 20px;">'
             tbl_html2 += '<div class="section-banner">RELATIVE STRENGTH // TOP 10 (30-DAY GAINERS)</div>'
             tbl_html2 += f'<table class="sheet-table"><thead><tr><th>TICKER</th><th>ASSET NAME</th><th>PRICE</th><th>30D (%)</th><th>TODAY (%)</th><th>CAP</th><th>P/E</th>{build_extra_th()}<th>SIGNAL</th><th style="text-align:center;">30D TREND</th></tr></thead><tbody>'
-            
             for r in sorted_mom:
                 c_pct = "pos-cell" if r["chg_pct"] >= 0 else "neg-cell"
                 c_30 = "pos-cell" if r["gain_30"] >= 0 else "neg-cell"
@@ -997,13 +988,12 @@ with tab_sector:
                 s_30 = "+" if r["gain_30"] >= 0 else ""
                 cue = '<span class="bullish-badge">BULL</span>' if r["bullish"] else '<span class="bearish-badge">BEAR</span>'
                 spark = make_svg_sparkline(r["sparkline"], is_positive=(r["gain_30"] >= 0))
-
                 tbl_html2 += f'<tr><td style="font-weight:700;">{r["ticker"]}</td><td style="max-width:120px; overflow:hidden; text-overflow:ellipsis;">{r["name"]}</td><td>${r["price"]:.2f}</td><td class="{c_30}">{s_30}{r["gain_30"]:.2f}%</td><td class="{c_pct}">{s_pct}{r["chg_pct"]:.2f}%</td><td>{r["mcap_fmt"]}</td><td>{r["pe"]}</td>{build_extra_td(r)}<td style="text-align:center;">{cue}</td><td style="text-align:center;">{spark}</td></tr>'
             tbl_html2 += '</tbody></table></div>'
             render_html(tbl_html2)
 
 # ---------------------------------------------------------
-# TAB 3: MOMENTUM SCATTER MATRIX (DESCRIPTIVE DROPDOWNS)
+# TAB 3: DYNAMIC LIVE MOMENTUM SCATTER MATRIX
 # ---------------------------------------------------------
 METRIC_REGISTRY = {
     "Daily Gain (%) (Today's percentage price change)": "Daily Gain (%)",
@@ -1021,21 +1011,49 @@ METRIC_REGISTRY = {
 }
 
 with tab_scatter:
-    st.markdown("<div class='section-banner'>RELATIVE STRENGTH MATRIX // MULTI-DIMENSIONAL ANALYSIS</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-banner'>LIVE MARKET MATRIX // DYNAMIC CONSTITUENT EXPLORER</div>", unsafe_allow_html=True)
     
-    col_sc1, col_x, col_y = st.columns([1.2, 1, 1])
-    col_color, col_size, _ = st.columns([1.2, 1, 1])
+    # Row 1: Sector Universe, Live Screener Mode, Stock Count Stepper, Custom Tickers
+    r1_col1, r1_col2, r1_col3, r1_col4 = st.columns([1.2, 1.3, 1, 1.2])
     
-    with col_sc1:
-        scatter_sector = st.selectbox("SELECT SECTOR FOR MATRIX", list(SECTOR_DATASETS.keys()), index=list(SECTOR_DATASETS.keys()).index(st.session_state.selected_sector))
-    
+    with r1_col1:
+        scatter_sector = st.selectbox(
+            "SELECT SECTOR FOR MATRIX", 
+            list(SECTOR_DATASETS.keys()), 
+            index=list(SECTOR_DATASETS.keys()).index(st.session_state.selected_sector)
+        )
+    with r1_col2:
+        screener_mode = st.selectbox(
+            "LIVE MARKET SCREENER (DAILY RANKING)",
+            [
+                "Top Movers Today (Largest % Swings)",
+                "Top Gainers Today",
+                "Top Losers Today",
+                "Highest Volume Today",
+                "Standard Index Order"
+            ],
+            index=0
+        )
+    with r1_col3:
+        # Step Slider: Lets you dial up/down stocks in increments of 5 or 10
+        stock_count = st.select_slider(
+            "STOCKS TO DISPLAY",
+            options=[5, 10, 15, 20, 25, 30, 40, 50],
+            value=20
+        )
+    with r1_col4:
+        custom_input = st.text_input("ADD CUSTOM TICKERS (COMMA-SEPARATED)", placeholder="e.g. PLTR, SMCI, TSM")
+
+    # Row 2: Metric Mapping Dropdowns with Context in Parentheses
+    r2_col1, r2_col2, r2_col3, r2_col4 = st.columns(4)
+
     x_opts = [
         "30D Gain (%) (Trailing 22-session momentum return)",
         "RS vs SPY Alpha (%) (Compares stock return directly against SPY)",
         "50D SMA Spread (%) (% distance above/below 50-day moving average)",
         "14D RSI (Momentum oscillator: >70 overbought, <30 oversold)"
     ]
-    with col_x:
+    with r2_col1:
         x_label = st.selectbox("X-AXIS (MOMENTUM)", x_opts, index=0)
         x_col = METRIC_REGISTRY[x_label]
 
@@ -1045,7 +1063,7 @@ with tab_scatter:
         "50D SMA Spread (%) (% distance above/below 50-day moving average)",
         "RVOL (Today's volume vs 20-day average; >1.5x is heavy)"
     ]
-    with col_y:
+    with r2_col2:
         y_label = st.selectbox("Y-AXIS (VELOCITY)", y_opts, index=0)
         y_col = METRIC_REGISTRY[y_label]
 
@@ -1060,7 +1078,7 @@ with tab_scatter:
         "PEG Ratio (P/E divided by growth rate; <1.0 is undervalued)",
         "Beta (Market volatility sensitivity; S&P 500 = 1.0)"
     ]
-    with col_color:
+    with r2_col3:
         color_label = st.selectbox("COLOR DIMENSION", color_opts, index=0)
         color_col = METRIC_REGISTRY[color_label]
 
@@ -1069,15 +1087,26 @@ with tab_scatter:
         "RVOL (Today's volume vs 20-day average; >1.5x is heavy)",
         "Dividend Yield (%) (Annual cash dividend divided by share price)"
     ]
-    with col_size:
+    with r2_col4:
         size_label = st.selectbox("BUBBLE SIZE", size_opts, index=0)
         size_col = METRIC_REGISTRY[size_label]
 
-    matrix_tickers = SECTOR_DATASETS[scatter_sector]
-    matrix_data = fetch_ticker_data(matrix_tickers)
+    # Dynamically pull the entire sector pool from live S&P 500
+    all_sector_tickers = SECTOR_DATASETS[scatter_sector]
+    ranked_tickers = rank_live_sector_stocks(all_sector_tickers, mode=screener_mode)
+    selected_matrix_tickers = ranked_tickers[:int(stock_count)]
+
+    # Merge custom user tickers if provided
+    if custom_input:
+        extra_tickers = [t.strip().upper() for t in custom_input.split(",") if t.strip()]
+        active_matrix_tickers = list(dict.fromkeys(selected_matrix_tickers + extra_tickers))
+    else:
+        active_matrix_tickers = selected_matrix_tickers
+
+    matrix_data = fetch_ticker_data(active_matrix_tickers)
 
     plot_rows = []
-    for t in matrix_tickers:
+    for t in active_matrix_tickers:
         if t in matrix_data:
             d = matrix_data[t]
             plot_rows.append({
@@ -1235,30 +1264,29 @@ with tab_glossary:
     st.markdown("<div class='section-banner'>TERMINAL GLOSSARY // INSTITUTIONAL VALUATION & METRIC REFERENCE</div>", unsafe_allow_html=True)
     
     g_col1, g_col2 = st.columns(2)
-    
     with g_col1:
-        st.markdown(f"""
+        st.markdown("""
         ### VALUATION & MULTIPLES
         * **Trailing P/E (Price-to-Earnings):** Current share price divided by actual net income per share over the trailing 12 months (TTM). Backward-looking, but audited.
         * **Forward P/E:** Current share price divided by Wall Street consensus EPS estimates over the upcoming 12 months. Highlights whether earnings are expected to expand (compressing the multiple) or contract.
-        * **PEG Ratio (Price/Earnings-to-Growth):** $\\text{{P/E Ratio}} \\div \\text{{Annual Expected EPS Growth Rate}}$. A PEG under **1.0** traditionally indicates a company is undervalued relative to its growth trajectory.
-        * **Market Capitalization (Cap):** Total equity value of a firm ($\\text{{Shares Outstanding}} \\times \\text{{Share Price}}$). Categorized as Mega-Cap ($200B+), Large-Cap ($10B–$200B), Mid-Cap ($2B–$10B), and Small-Cap (<$2B).
+        * **PEG Ratio (Price/Earnings-to-Growth):** $\\text{P/E Ratio} \\div \\text{Annual Expected EPS Growth Rate}$. A PEG under **1.0** traditionally indicates a company is undervalued relative to its growth trajectory.
+        * **Market Capitalization (Cap):** Total equity value of a firm ($\\text{Shares Outstanding} \\times \\text{Share Price}$). Categorized as Mega-Cap ($200B+), Large-Cap ($10B–$200B), Mid-Cap ($2B–$10B), and Small-Cap (<$2B).
 
         ---
 
         ### EARNINGS & ACCOUNTING STANDARDS
-        * **EPS (Earnings Per Share):** The net portion of a company's profit allocated to each share of common stock ($\\text{{Net Income}} \\div \\text{{Shares Outstanding}}$).
+        * **EPS (Earnings Per Share):** The net portion of a company's profit allocated to each share of common stock ($\\text{Net Income} \\div \\text{Shares Outstanding}$).
         * **GAAP Net Income:** Earnings calculated under strict, standardized Generally Accepted Accounting Principles. Mandatory for official SEC 10-K/10-Q filings.
         * **Non-GAAP ("Adjusted") Earnings:** Operational metrics reported by management that remove non-cash expenses (e.g., stock-based compensation, goodwill impairments) to portray core recurring profitability. Tech and SaaS firms frequently look profitable on Non-GAAP while technically losing money on a GAAP basis.
         """)
         
     with g_col2:
-        st.markdown(f"""
+        st.markdown("""
         ### ADVANCED TECHNICAL INDICATORS & SIGNALS
         * **14D RSI (Relative Strength Index):** Velocity oscillator measured from 0 to 100. Readings above **70** indicate overbought/extended conditions; readings below **30** indicate oversold washouts. Healthy growth stocks typically hold support between **45 and 55** during pullbacks.
         * **50D Spread (% Distance from 50 SMA):** Quantitative extension relative to the institutional 50-day moving average. Positive values confirm an ongoing uptrend; values exceeding **+12% to +15%** flag severe overextension where institutional buying typically pauses.
         * **RVOL (Relative Volume):** Ratio of today's volume to the 20-day historical average. An RVOL above **1.50x** confirms heavy institutional participation and authentic breakouts/rotations, while an RVOL below **0.70x** signals low-conviction chop.
-        * **RS vs. SPY (30D Alpha):** Net 30-day percentage outperformance against the S&P 500 ($\\text{{Stock 30D \\%}} - \\text{{SPY 30D \\%}}$). Positive values highlight the true leaders attracting rotated institutional capital.
+        * **RS vs. SPY (30D Alpha):** Net 30-day percentage outperformance against the S&P 500 ($\\text{Stock 30D \\%} - \\text{SPY 30D \\%}$). Positive values highlight the true leaders attracting rotated institutional capital.
         * **9 & 21 EMA Signal:** Short-term trend confirmation. Marked **BULL** when the fast 9 EMA holds above the 21 EMA, and **BEAR** when short-term momentum breaks down.
         * **Beta ($\\beta$):** Systematic market sensitivity (S&P 500 = 1.0). A Beta of 1.8 indicates the asset moves with nearly 80% higher amplitude than the broader index.
         """)
