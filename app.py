@@ -252,32 +252,19 @@ def load_portfolio_holdings():
     if not csv_files:
         return []
     
-    # Read Fidelity export CSV with robust header search
-    df = None
-    for skip in range(12):
-        try:
-            temp_df = pd.read_csv(csv_files[0], skiprows=skip)
-            cols = [str(c).strip() for c in temp_df.columns]
-            if "Symbol" in cols and "Quantity" in cols:
-                df = temp_df
-                break
-        except Exception:
-            continue
-            
-    if df is None:
-        try:
-            df = pd.read_csv(csv_files[0])
-        except Exception:
-            return []
-            
+    # Read Fidelity CSV directly (Fidelity portfolio exports have columns on row 0)
+    try:
+        df = pd.read_csv(csv_files[0])
+    except Exception:
+        return []
+        
     holdings = []
     for _, row in df.iterrows():
         symbol = str(row.get("Symbol", "")).strip()
-        # Clean symbol (e.g. remove trailing asterisks or descriptions)
+        # Clean symbol
         if not symbol or symbol == "nan" or symbol.startswith("Pending") or symbol.startswith("The data") or symbol.startswith("Brokerage") or symbol.startswith("Date") or symbol.startswith("Account"):
             continue
         
-        # Exclude money market cash funds like SPAXX**
         if "**" in symbol or symbol in ["SPAXX", "FDRXX", "FCASH"]:
             continue
         
