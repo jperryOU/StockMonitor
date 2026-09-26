@@ -150,7 +150,7 @@ THEMES = {
 # ---------------------------------------------------------
 # SIDEBAR SETTINGS MENU
 # ---------------------------------------------------------
-st.sidebar.markdown("### SYSTEM SETTINGS")
+st.sidebar.markdown("<div class='section-banner' style='margin-bottom:12px;'>SYSTEM SETTINGS</div>", unsafe_allow_html=True)
 theme_select = st.sidebar.selectbox(
     "TERMINAL THEME PRESET",
     list(THEMES.keys()),
@@ -162,7 +162,7 @@ if theme_select != st.session_state.theme_choice:
 
 thm = THEMES[st.session_state.theme_choice]
 
-if st.sidebar.button("FORCE REFRESH DATA"):
+if st.sidebar.button("FORCE REFRESH DATA", use_container_width=True):
     st.cache_data.clear()
     st.rerun()
 
@@ -199,17 +199,19 @@ css_styling = f"""
         color: {thm['text_color']} !important;
     }}
     
-    /* COMPLETE FIX FOR WHITE SELECTBOX (SIDEBAR & MAIN BODY) */
-    .stSelectbox div[data-baseweb="select"],
-    .stSelectbox div[data-baseweb="select"] > div,
-    .stSelectbox div[data-baseweb="select"] div,
-    .stSelectbox div[data-baseweb="select"] span {{
+    /* UNIVERSAL FIX FOR SELECTBOXES (SIDEBAR & MAIN BODY) */
+    div[data-testid="stSelectbox"] div[data-baseweb="select"],
+    div[data-testid="stSelectbox"] div[data-baseweb="select"] > div,
+    div[data-baseweb="select"],
+    div[data-baseweb="select"] > div,
+    div[data-baseweb="select"] div,
+    div[data-baseweb="select"] span {{
         background-color: {thm['card_bg']} !important;
         color: {thm['text_color']} !important;
         border-color: {thm['card_border']} !important;
         border-radius: 0px !important;
     }}
-    .stSelectbox div[data-baseweb="select"] svg {{
+    div[data-baseweb="select"] svg {{
         fill: {thm['text_color']} !important;
         color: {thm['text_color']} !important;
     }}
@@ -220,14 +222,17 @@ css_styling = f"""
         background-color: {thm['card_bg']} !important;
         color: {thm['text_color']} !important;
         border-color: {thm['card_border']} !important;
+        border-radius: 0px !important;
     }}
-    div[data-baseweb="popover"] li:hover {{
+    div[data-baseweb="popover"] li:hover,
+    div[data-baseweb="popover"] li[aria-selected="true"] {{
         background-color: {thm['card_hover']} !important;
+        color: {thm['banner_text']} !important;
     }}
 
     /* Sidebar Button Styling */
     section[data-testid="stSidebar"] div[data-testid="stButton"] {{
-        margin-top: 12px !important;
+        margin-top: 14px !important;
     }}
     section[data-testid="stSidebar"] div[data-testid="stButton"] > button {{
         background-color: {thm['card_bg']} !important;
@@ -332,14 +337,15 @@ css_styling = f"""
         text-transform: uppercase;
     }}
 
-    /* Ribbon Button Styler - PREVENTS TRUNCATION (...) & FORCES 2 LINES */
-    div[data-testid="column"] div[data-testid="stButton"] > button {{
+    /* RIBBON BUTTON STYLER - PREVENTS WHITE BOX & TRUNCATION (...) */
+    div[data-testid*="olumn"] div[data-testid="stButton"] > button,
+    div[data-testid="stButton"] > button {{
         border-radius: 0px !important;
         border: 1px solid {thm['card_border']} !important;
         background-color: {thm['card_bg']} !important;
         color: {thm['text_color']} !important;
-        padding: 3px 1px !important;
-        min-height: 42px !important;
+        padding: 4px 1px !important;
+        min-height: 44px !important;
         height: auto !important;
         width: 100% !important;
         display: flex !important;
@@ -347,20 +353,23 @@ css_styling = f"""
         align-items: center !important;
         justify-content: center !important;
     }}
-    div[data-testid="column"] div[data-testid="stButton"] > button:hover {{
+    div[data-testid*="olumn"] div[data-testid="stButton"] > button:hover,
+    div[data-testid="stButton"] > button:hover {{
         background-color: {thm['card_hover']} !important;
         border-color: {thm['banner_text']} !important;
     }}
-    div[data-testid="column"] div[data-testid="stButton"] > button p,
-    div[data-testid="column"] div[data-testid="stButton"] > button div {{
+    div[data-testid="stButton"] button p,
+    div[data-testid="stButton"] button div,
+    div[data-testid="stButton"] button span {{
         color: {thm['text_color']} !important;
         white-space: pre-line !important;
+        white-space: pre-wrap !important;
         word-break: normal !important;
         text-overflow: clip !important;
         overflow: visible !important;
         font-size: 9.5px !important;
         font-weight: 700 !important;
-        line-height: 1.15 !important;
+        line-height: 1.2 !important;
         text-align: center !important;
         margin: 0 !important;
         padding: 0 !important;
@@ -555,9 +564,9 @@ for i, ticker in enumerate(ALL_BENCH_TICKERS):
         if ticker in bench_data:
             d = bench_data[ticker]
             sign = "+" if d["change_pct"] >= 0 else ""
-            btn_text = f"{label}\n{ticker} {sign}{d['change_pct']:.1f}%"
+            btn_text = f"{label}  \n{ticker} {sign}{d['change_pct']:.1f}%"
         else:
-            btn_text = f"{label}\n{ticker} --"
+            btn_text = f"{label}  \n{ticker} --"
             
         if st.button(btn_text, key=f"bench_btn_{ticker}", use_container_width=True):
             if is_clickable_sector:
