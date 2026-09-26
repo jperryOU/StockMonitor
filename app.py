@@ -9,6 +9,18 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
+# ---------------------------------------------------------
+# SESSION STATE INITIALIZATION
+# ---------------------------------------------------------
+if "selected_sector" not in st.session_state:
+    st.session_state.selected_sector = "Information Technology"
+if "active_tab" not in st.session_state:
+    st.session_state.active_tab = 0
+if "port_sort_col" not in st.session_state:
+    st.session_state.port_sort_col = "mval"
+if "port_sort_asc" not in st.session_state:
+    st.session_state.port_sort_asc = False
+
 def render_html(html_code):
     clean = "\n".join(line.strip() for line in html_code.splitlines() if line.strip())
     if hasattr(st, "html"):
@@ -17,72 +29,41 @@ def render_html(html_code):
         st.markdown(clean, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# INDUSTRIAL / INSTITUTIONAL TERMINAL STYLING (SHARP EDGES, MONO)
+# CLEAN, READABLE HIGH-CONTRAST TERMINAL STYLING
 # ---------------------------------------------------------
 css_styling = """
 <style>
     .block-container {
         padding-top: 4.2rem !important;
         padding-bottom: 2rem !important;
-        padding-left: 1rem !important;
-        padding-right: 1rem !important;
-        font-family: "Consolas", "Roboto Mono", "Menlo", monospace !important;
-    }
-    .benchmark-container {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 4px;
-        margin-bottom: 12px;
-    }
-    .bench-card {
-        flex: 1 1 105px;
-        min-width: 100px;
-        border: 1px solid #475569;
-        background: #F8FAFC;
-        text-align: center;
-        padding: 4px 2px;
-        border-radius: 0px !important;
-        font-family: "Consolas", "Roboto Mono", "Menlo", monospace;
-    }
-    .bench-title {
-        font-size: 10px;
-        font-weight: 700;
-        color: #0F172A;
-        border-bottom: 1px solid #CBD5E1;
-        padding-bottom: 2px;
-        margin-bottom: 2px;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        white-space: nowrap;
-    }
-    .bench-price {
-        font-size: 11px;
-        font-weight: 700;
-        white-space: nowrap;
+        padding-left: 1.5rem !important;
+        padding-right: 1.5rem !important;
+        font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif !important;
     }
     .sheet-table {
         width: 100%;
         border-collapse: collapse;
-        font-family: "Consolas", "Roboto Mono", "Menlo", monospace;
-        font-size: 11px;
+        font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+        font-size: 12px;
         background-color: #FFFFFF;
         border: 1px solid #334155;
         margin-bottom: 16px;
+        font-variant-numeric: tabular-nums;
     }
     .sheet-table th {
         background-color: #0F172A;
         color: #F8FAFC;
         font-weight: 700;
-        padding: 5px 6px;
+        padding: 6px 8px;
         border: 1px solid #334155;
         text-align: left;
         white-space: nowrap;
         text-transform: uppercase;
         letter-spacing: 0.5px;
-        font-size: 10.5px;
+        font-size: 11px;
     }
     .sheet-table td {
-        padding: 4px 6px;
+        padding: 5px 8px;
         border: 1px solid #CBD5E1;
         color: #0F172A;
         white-space: nowrap;
@@ -94,14 +75,13 @@ css_styling = """
         background-color: #1E293B;
         color: #F8FAFC;
         font-weight: 700;
-        font-size: 11px;
+        font-size: 11.5px;
         letter-spacing: 0.8px;
-        padding: 5px 8px;
+        padding: 6px 10px;
         border-radius: 0px !important;
         border: 1px solid #0F172A;
         border-bottom: none;
         text-transform: uppercase;
-        font-family: "Consolas", "Roboto Mono", "Menlo", monospace;
     }
     .pos-cell {
         background-color: #DCFCE7 !important;
@@ -117,31 +97,43 @@ css_styling = """
         background-color: #15803D;
         color: #FFFFFF;
         font-weight: 700;
-        padding: 1px 4px;
+        padding: 2px 6px;
         border-radius: 0px !important;
         display: inline-block;
-        font-size: 9.5px;
+        font-size: 10px;
         text-transform: uppercase;
     }
     .bearish-badge {
         background-color: #B91C1C;
         color: #FFFFFF;
         font-weight: 700;
-        padding: 1px 4px;
+        padding: 2px 6px;
         border-radius: 0px !important;
         display: inline-block;
-        font-size: 9.5px;
+        font-size: 10px;
         text-transform: uppercase;
     }
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 2px;
+    /* Compact clickable benchmark tiles */
+    div[data-testid="column"] button {
+        border-radius: 0px !important;
+        border: 1px solid #475569 !important;
+        background: #F8FAFC !important;
+        color: #0F172A !important;
+        padding: 3px 2px !important;
+        font-size: 10.5px !important;
+        font-weight: 700 !important;
+        line-height: 1.2 !important;
+        min-height: 38px !important;
+    }
+    div[data-testid="column"] button:hover {
+        background: #E2E8F0 !important;
+        border-color: #0F172A !important;
     }
     .stTabs [data-baseweb="tab"] {
         border-radius: 0px !important;
-        font-family: "Consolas", "Roboto Mono", "Menlo", monospace;
         font-weight: 700;
-        font-size: 11px;
-        padding: 6px 14px;
+        font-size: 11.5px;
+        padding: 6px 16px;
         border: 1px solid #475569;
         background: #E2E8F0;
         color: #0F172A;
@@ -153,19 +145,18 @@ css_styling = """
     }
     div[data-testid="stMetric"] {
         border: 1px solid #475569 !important;
-        padding: 8px 10px !important;
+        padding: 8px 12px !important;
         background: #F8FAFC !important;
         border-radius: 0px !important;
     }
     div[data-testid="stMetricLabel"] {
-        font-family: "Consolas", "Roboto Mono", "Menlo", monospace !important;
         font-size: 11px !important;
         text-transform: uppercase !important;
+        font-weight: 700 !important;
         color: #475569 !important;
     }
     div[data-testid="stMetricValue"] {
-        font-family: "Consolas", "Roboto Mono", "Menlo", monospace !important;
-        font-weight: 700 !important;
+        font-weight: 800 !important;
         color: #0F172A !important;
     }
 </style>
@@ -248,48 +239,72 @@ def fmt_mcap(val):
     return f"${val / 1e6:.2f}M"
 
 # ---------------------------------------------------------
-# 1. MACRO & SECTOR BENCHMARK RIBBON
+# SECTOR REGISTRY
 # ---------------------------------------------------------
-st.markdown("#### >> MARKET OVERVIEW // GICS SECTOR BENCHMARKS")
+SECTOR_MAP = {
+    "XLK": ("Information Technology", "XLK • TECH"),
+    "XLV": ("Health Care", "XLV • HLTH"),
+    "XLF": ("Financials", "XLF • FINC"),
+    "XLY": ("Consumer Discretionary", "XLY • COND"),
+    "XLC": ("Communication Services", "XLC • COMM"),
+    "XLI": ("Industrials", "XLI • INDU"),
+    "XLP": ("Consumer Staples", "XLP • CONS"),
+    "XLE": ("Energy", "XLE • ENGY"),
+    "XLU": ("Utilities", "XLU • UTIL"),
+    "XLRE": ("Real Estate", "XLRE • REAL"),
+    "XLB": ("Materials", "XLB • MATR")
+}
 
-benchmarks_meta = [
-    ("XLK", "XLK:TECH"),
-    ("XLV", "XLV:HLTH"),
-    ("XLF", "XLF:FINC"),
-    ("XLY", "XLY:COND"),
-    ("XLC", "XLC:COMM"),
-    ("XLI", "XLI:IND"),
-    ("XLP", "XLP:CONS"),
-    ("XLE", "XLE:ENGY"),
-    ("XLU", "XLU:UTIL"),
-    ("XLRE", "XLRE:REAL"),
-    ("XLB", "XLB:MATR"),
-    ("SPY", "SPY:S&P"),
-    ("QQQ", "QQQ:NDX"),
-    ("DIA", "DIA:DJI")
+BENCHMARKS_EXTRA = [
+    ("SPY", "SPY • S&P"),
+    ("QQQ", "QQQ • NDX"),
+    ("DIA", "DIA • DJI")
 ]
 
-bench_data = fetch_ticker_data([b[0] for b in benchmarks_meta])
+ALL_BENCH_TICKERS = list(SECTOR_MAP.keys()) + [b[0] for b in BENCHMARKS_EXTRA]
+bench_data = fetch_ticker_data(ALL_BENCH_TICKERS)
 
-bench_html = '<div class="benchmark-container">'
-for ticker, label in benchmarks_meta:
-    if ticker in bench_data:
-        d = bench_data[ticker]
-        color = "#15803D" if d["change_pct"] >= 0 else "#B91C1C"
-        sign = "+" if d["change_pct"] >= 0 else ""
-        bench_html += f'<div class="bench-card"><div class="bench-title">{label}</div><div class="bench-price" style="color: {color};">${d["price"]:.2f} [{sign}{d["change_pct"]:.2f}%]</div></div>'
-    else:
-        bench_html += f'<div class="bench-card"><div class="bench-title">{label}</div><div class="bench-price" style="color: #64748B;">--</div></div>'
-bench_html += '</div>'
-render_html(bench_html)
+# ---------------------------------------------------------
+# 1. TOP INTERACTIVE BENCHMARK RIBBON
+# ---------------------------------------------------------
+st.markdown("#### >> MARKET OVERVIEW // CLICK ANY SECTOR TO INSPECT")
+
+cols = st.columns(len(ALL_BENCH_TICKERS))
+for i, ticker in enumerate(ALL_BENCH_TICKERS):
+    with cols[i]:
+        if ticker in SECTOR_MAP:
+            sec_name, label = SECTOR_MAP[ticker]
+            is_clickable_sector = True
+        else:
+            sec_name, label = None, next(b[1] for b in BENCHMARKS_EXTRA if b[0] == ticker)
+            is_clickable_sector = False
+            
+        if ticker in bench_data:
+            d = bench_data[ticker]
+            sign = "+" if d["change_pct"] >= 0 else ""
+            btn_text = f"{label}\n${d['price']:.2f} [{sign}{d['change_pct']:.2f}%]"
+        else:
+            btn_text = f"{label}\n--"
+            
+        if st.button(btn_text, key=f"bench_btn_{ticker}", use_container_width=True):
+            if is_clickable_sector:
+                st.session_state.selected_sector = sec_name
+                st.session_state.active_tab = 1
+                st.rerun()
+
+st.markdown("<div style='height:6px;'></div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
 # TABS SETUP
 # ---------------------------------------------------------
-tab_portfolio, tab_sector, tab_commodities = st.tabs(["PORTFOLIO POSITIONS", "SECTOR INTELLIGENCE", "COMMODITIES & DERIVATIVES"])
+tab_portfolio, tab_sector, tab_commodities = st.tabs([
+    "PORTFOLIO POSITIONS",
+    "SECTOR INTELLIGENCE",
+    "COMMODITIES & DERIVATIVES"
+])
 
 # ---------------------------------------------------------
-# PORTFOLIO TAB
+# PORTFOLIO LOADER
 # ---------------------------------------------------------
 @st.cache_data(ttl=60)
 def load_portfolio_holdings():
@@ -368,6 +383,9 @@ def load_portfolio_holdings():
         })
     return result
 
+# ---------------------------------------------------------
+# TAB 1: PORTFOLIO (WITH INTERACTIVE HEADER SORTING)
+# ---------------------------------------------------------
 with tab_portfolio:
     st.markdown("<div class='section-banner'>PORTFOLIO AUDIT // REAL-TIME PERFORMANCE</div>", unsafe_allow_html=True)
     portfolio_holdings = load_portfolio_holdings()
@@ -435,6 +453,39 @@ with tab_portfolio:
         
         st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
         
+        # --- Interactive Sort Controls ---
+        st.markdown("<span style='font-size:11px; font-weight:700; color:#475569;'>SORT TABLE BY:</span>", unsafe_allow_html=True)
+        s_cols = st.columns([1, 1, 1, 1, 1.2, 1.2, 1.2, 1.2, 1.2, 3])
+        sort_fields = [
+            ("TICKER", "ticker"),
+            ("SHARES", "shares"),
+            ("AVG COST", "cost"),
+            ("PRICE", "price"),
+            ("MKT VAL", "mval"),
+            ("TDY $", "daily_dlr"),
+            ("TDY %", "daily_pct"),
+            ("TOTAL $", "overall_dlr"),
+            ("TOTAL %", "overall_pct")
+        ]
+        
+        for idx, (label, col_key) in enumerate(sort_fields):
+            with s_cols[idx]:
+                arrow = ""
+                if st.session_state.port_sort_col == col_key:
+                    arrow = " ▲" if st.session_state.port_sort_asc else " ▼"
+                if st.button(f"{label}{arrow}", key=f"sort_btn_{col_key}", use_container_width=True):
+                    if st.session_state.port_sort_col == col_key:
+                        st.session_state.port_sort_asc = not st.session_state.port_sort_asc
+                    else:
+                        st.session_state.port_sort_col = col_key
+                        st.session_state.port_sort_asc = False if col_key in ["mval", "daily_dlr", "daily_pct", "overall_dlr", "overall_pct"] else True
+                    st.rerun()
+
+        # Apply Sort
+        sort_k = st.session_state.port_sort_col
+        port_rows = sorted(port_rows, key=lambda x: (x.get(sort_k, 0) or 0), reverse=not st.session_state.port_sort_asc)
+        
+        # Render Table
         port_html = '<div style="overflow-x: auto; margin-bottom: 20px;">'
         port_html += '<table class="sheet-table"><thead><tr><th>TICKER</th><th>ASSET NAME</th><th>SHARES</th><th>AVG COST</th><th>MARK PRICE</th><th>MARKET VALUE</th><th>TODAY ($)</th><th>TODAY (%)</th><th>UNREALIZED ($)</th><th>UNREALIZED (%)</th><th style="text-align:center;">SIGNAL</th><th style="text-align:center;">30D TREND</th></tr></thead><tbody>'
         
@@ -457,13 +508,9 @@ with tab_portfolio:
         st.info("NO PORTFOLIO POSITIONS AVAILABLE.")
 
 # ---------------------------------------------------------
-# 2. FULL GICS SECTOR CONSTITUENTS (TOP 20+ PER SECTOR)
+# TAB 2: SECTOR EXPLORER
 # ---------------------------------------------------------
 SECTOR_DATASETS = {
-    "Communication Services": [
-        "GOOGL", "GOOG", "META", "NFLX", "DIS", "TMUS", "VZ", "T", "CMCSA", "CHTR",
-        "WBD", "EA", "TTWO", "OMC", "IPG", "FOXA", "FOX", "NWSA", "NWS", "LYV", "SPOT", "DASH", "PINS", "ROKU"
-    ],
     "Information Technology": [
         "MSFT", "AAPL", "NVDA", "AVGO", "ORCL", "CRM", "AMD", "QCOM", "ADBE", "CSCO",
         "ACN", "TXN", "INTU", "NOW", "AMAT", "MU", "ADI", "LRCX", "KLAC", "PANW", "SNPS", "CDNS", "MRVL"
@@ -479,6 +526,10 @@ SECTOR_DATASETS = {
     "Consumer Discretionary": [
         "AMZN", "TSLA", "HD", "MCD", "NKE", "LOW", "BKNG", "SBUX", "TJX", "TGT",
         "LULU", "MAR", "HLT", "ORLY", "AZO", "CMG", "ROST", "YUM", "EBAY", "DRI", "EXPE"
+    ],
+    "Communication Services": [
+        "GOOGL", "GOOG", "META", "NFLX", "DIS", "TMUS", "VZ", "T", "CMCSA", "CHTR",
+        "WBD", "EA", "TTWO", "OMC", "IPG", "FOXA", "FOX", "NWSA", "NWS", "LYV", "SPOT", "DASH", "PINS", "ROKU"
     ],
     "Industrials": [
         "GE", "CAT", "RTX", "UNP", "HON", "BA", "DE", "LMT", "UPS", "ETN",
@@ -509,7 +560,12 @@ SECTOR_DATASETS = {
 with tab_sector:
     col_sel, col_note = st.columns([1, 3])
     with col_sel:
-        selected_sector = st.selectbox("SELECT SECTOR BENCHMARK", list(SECTOR_DATASETS.keys()), index=0)
+        # Defaults to sector picked from ribbon
+        sector_list = list(SECTOR_DATASETS.keys())
+        default_idx = sector_list.index(st.session_state.selected_sector) if st.session_state.selected_sector in sector_list else 0
+        selected_sector = st.selectbox("SELECT SECTOR BENCHMARK", sector_list, index=default_idx)
+        st.session_state.selected_sector = selected_sector
+        
     with col_note:
         st.markdown("<p style='font-size:11px; color:#475569; margin-top:28px;'>// PARSED DATA: TOP MARKET CAPITALIZATION CONSTITUENTS AND 30-DAY RELATIVE STRENGTH</p>", unsafe_allow_html=True)
 
@@ -577,11 +633,11 @@ with tab_sector:
             render_html(tbl_html2)
 
 # ---------------------------------------------------------
-# 3. COMMODITIES TAB
+# TAB 3: COMMODITIES TAB
 # ---------------------------------------------------------
 COMMODITIES_REGISTRY = [
     {"group": "Crude Oil", "benchmark": "WTI Light Sweet Crude", "ticker": "USO", "name": "United States Oil Fund LP", "leverage": "1x Spot / Front-Month", "expense": "0.60%"},
-    {"group": "Crude Oil", "benchmark": "Bloomberg WTI Crude Subindex", "ticker": "UCO", "name": "ProShares Ultra Bloomberg Crude", "leverage": "2x Leveraged Long", "expense": "0.95%"},
+    {"group": "Crude Oil", "benchmark": "Bloomberg WTI Crude Subindex", "ticker": "UCO", "name": "ProShares Ultra Bloomberg Crude", "leverage": "2x Daily Leveraged Long", "expense": "0.95%"},
     {"group": "Crude Oil", "benchmark": "Bloomberg WTI Crude Subindex", "ticker": "SCO", "name": "ProShares UltraShort Bloomberg Crude", "leverage": "-2x Leveraged Inverse", "expense": "0.95%"},
     {"group": "Crude Oil", "benchmark": "WTI Crude Futures (12-Month)", "ticker": "USL", "name": "United States 12 Month Oil Fund", "leverage": "1x 12-Month Strip Curve", "expense": "0.90%"},
     {"group": "Crude Oil", "benchmark": "ICE Brent Crude Futures", "ticker": "BNO", "name": "United States Brent Oil Fund LP", "leverage": "1x Front-Month Brent", "expense": "1.02%"},
@@ -589,7 +645,7 @@ COMMODITIES_REGISTRY = [
     {"group": "Refined Products", "benchmark": "DBIQ Optimum Yield Energy", "ticker": "DBE", "name": "Invesco DB Energy Fund", "leverage": "1x Multi-Fuel & Heating Oil", "expense": "0.77%"},
     {"group": "Refined Products", "benchmark": "MVIS Global Oil Refiners", "ticker": "CRAK", "name": "VanEck Oil Refiners ETF", "leverage": "1x Crack Spread Refiners", "expense": "0.60%"},
     {"group": "Natural Gas", "benchmark": "Henry Hub Natural Gas", "ticker": "UNG", "name": "United States Natural Gas Fund", "leverage": "1x Front-Month Nat Gas", "expense": "1.06%"},
-    {"group": "Natural Gas", "benchmark": "Bloomberg Nat Gas Subindex", "ticker": "BOIL", "name": "ProShares Ultra Bloomberg Nat Gas", "leverage": "2x Leveraged Long", "expense": "0.95%"},
+    {"group": "Natural Gas", "benchmark": "Bloomberg Nat Gas Subindex", "ticker": "BOIL", "name": "ProShares Ultra Bloomberg Nat Gas", "leverage": "2x Daily Leveraged Long", "expense": "0.95%"},
     {"group": "Natural Gas", "benchmark": "Bloomberg Nat Gas Subindex", "ticker": "KOLD", "name": "ProShares UltraShort Nat Gas", "leverage": "-2x Leveraged Inverse", "expense": "0.95%"},
     {"group": "Biofuels", "benchmark": "CBOT Corn Futures", "ticker": "CORN", "name": "Teucrium Corn Fund", "leverage": "1x Ethanol Feedstock", "expense": "0.26%"},
     {"group": "Biofuels", "benchmark": "US Ethanol Production", "ticker": "GPRE", "name": "Green Plains Inc.", "leverage": "1x Pure Ethanol Refiner", "expense": "Operating"},
