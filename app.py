@@ -252,12 +252,13 @@ def load_portfolio_holdings():
     if not csv_files:
         return []
     
-    # Read Fidelity export CSV, skipping header comments or finding the header row
+    # Read Fidelity export CSV with robust header search
     df = None
-    for skip in range(10):
+    for skip in range(12):
         try:
             temp_df = pd.read_csv(csv_files[0], skiprows=skip)
-            if "Symbol" in temp_df.columns and "Quantity" in temp_df.columns:
+            cols = [str(c).strip() for c in temp_df.columns]
+            if "Symbol" in cols and "Quantity" in cols:
                 df = temp_df
                 break
         except Exception:
@@ -272,7 +273,12 @@ def load_portfolio_holdings():
     holdings = []
     for _, row in df.iterrows():
         symbol = str(row.get("Symbol", "")).strip()
+        # Clean symbol (e.g. remove trailing asterisks or descriptions)
         if not symbol or symbol == "nan" or symbol.startswith("Pending") or symbol.startswith("The data") or symbol.startswith("Brokerage") or symbol.startswith("Date") or symbol.startswith("Account"):
+            continue
+        
+        # Exclude money market cash funds like SPAXX**
+        if "**" in symbol or symbol in ["SPAXX", "FDRXX", "FCASH"]:
             continue
         
         try:
@@ -316,6 +322,14 @@ with tab_portfolio:
     st.markdown("<div class='section-banner'>PORTFOLIO HOLDINGS & REAL-TIME PERFORMANCE</div>", unsafe_allow_html=True)
     
     portfolio_holdings = load_portfolio_holdings()
+    
+    # Debug / Status indicator
+    import glob
+    csv_found = glob.glob("Portfolio_Positions*.csv")
+    if csv_found:
+        st.sidebar.success(f"Loaded CSV: {csv_found[0]} ({len(portfolio_holdings)} positions)")
+    else:
+        st.sidebar.warning("No CSV found; using fallback portfolio.")
     
     # Fallback if no CSV found
     if not portfolio_holdings:
