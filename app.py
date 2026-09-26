@@ -323,17 +323,11 @@ with tab_portfolio:
     
     portfolio_holdings = load_portfolio_holdings()
     
-
-
-
-
-
     # Debug info right in the main window so you can see what's loaded
     st.write(f"**Debug Info:** Loaded **{len(portfolio_holdings)}** positions from CSV.")
     if portfolio_holdings:
         st.write("Holdings detected:", [h['ticker'] for h in portfolio_holdings])
     else:
-
         st.warning("No holdings parsed from CSV. Showing fallback portfolio.")
     
     # Fallback if no CSV found
