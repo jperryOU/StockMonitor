@@ -9,31 +9,39 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
+# Helper function to prevent Markdown from interpreting indented HTML as code
+def render_html(html_code):
+    clean = "\n".join(line.strip() for line in html_code.splitlines() if line.strip())
+    if hasattr(st, "html"):
+        st.html(clean)
+    else:
+        st.markdown(clean, unsafe_allow_html=True)
+
 # ---------------------------------------------------------
 # CUSTOM TERMINAL / SPREADSHEET CSS
 # ---------------------------------------------------------
-st.markdown("""
+css_styling = """
 <style>
-    /* Global page padding */
     .block-container {
-        padding-top: 1.5rem;
-        padding-bottom: 2rem;
-        padding-left: 2rem;
-        padding-right: 2rem;
+        padding-top: 1.5rem !important;
+        padding-bottom: 2rem !important;
+        padding-left: 2rem !important;
+        padding-right: 2rem !important;
     }
-    
-    /* Benchmark Ribbon Grid */
     .benchmark-container {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(115px, 1fr));
+        display: flex;
+        flex-wrap: wrap;
         gap: 6px;
-        margin-bottom: 20px;
+        margin-bottom: 16px;
     }
     .bench-card {
+        flex: 1 1 115px;
+        min-width: 110px;
         border: 1px solid #D0D7DE;
         background: #FFFFFF;
         text-align: center;
-        padding: 6px 4px;
+        padding: 5px 3px;
+        border-radius: 2px;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
     .bench-title {
@@ -41,19 +49,15 @@ st.markdown("""
         font-weight: 600;
         color: #24292F;
         border-bottom: 1px solid #E1E4E8;
-        padding-bottom: 3px;
-        margin-bottom: 3px;
+        padding-bottom: 2px;
+        margin-bottom: 2px;
         white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
     }
     .bench-price {
         font-size: 11px;
         font-weight: 600;
-        letter-spacing: -0.2px;
+        white-space: nowrap;
     }
-    
-    /* Financial Table Styling */
     .sheet-table {
         width: 100%;
         border-collapse: collapse;
@@ -61,7 +65,7 @@ st.markdown("""
         font-size: 11.5px;
         background-color: #FFFFFF;
         border: 1px solid #D0D7DE;
-        margin-bottom: 25px;
+        margin-bottom: 20px;
     }
     .sheet-table th {
         background-color: #1A365D;
@@ -81,22 +85,18 @@ st.markdown("""
     .sheet-table tr:hover {
         background-color: #F8FAFC;
     }
-    
-    /* Section Banner Header */
     .section-banner {
         background-color: #0C2340;
         color: #FFFFFF;
         font-weight: bold;
-        font-size: 12.5px;
+        font-size: 12px;
         letter-spacing: 0.5px;
-        padding: 7px 12px;
-        border-top-left-radius: 4px;
-        border-top-right-radius: 4px;
+        padding: 7px 10px;
+        border-top-left-radius: 3px;
+        border-top-right-radius: 3px;
         text-transform: uppercase;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
-    
-    /* Conditional formatting helper classes */
     .pos-cell {
         background-color: #E6F4EA !important;
         color: #137333 !important;
@@ -111,7 +111,7 @@ st.markdown("""
         background-color: #E6F4EA;
         color: #137333;
         font-weight: 600;
-        padding: 2px 6px;
+        padding: 1px 5px;
         border-radius: 3px;
         display: inline-block;
     }
@@ -119,12 +119,13 @@ st.markdown("""
         background-color: #FCE8E6;
         color: #C5221F;
         font-weight: 600;
-        padding: 2px 6px;
+        padding: 1px 5px;
         border-radius: 3px;
         display: inline-block;
     }
 </style>
-""", unsafe_allow_html=True)
+"""
+render_html(css_styling)
 
 # ---------------------------------------------------------
 # CACHED DATA FETCHER
@@ -167,8 +168,6 @@ def fetch_ticker_data(tickers):
                 "day_low": float(low.iloc[-1]),
                 "day_high": float(high.iloc[-1]),
                 "vol": int(volume.iloc[-1]),
-                "low_52": float(close.min()),
-                "high_52": float(close.max()),
                 "market_cap": market_cap,
                 "pe_ratio": pe_ratio,
                 "sparkline": hist_30.tolist(),
@@ -178,7 +177,7 @@ def fetch_ticker_data(tickers):
             continue
     return data_dict
 
-def make_svg_sparkline(prices, is_positive=True, width=110, height=22):
+def make_svg_sparkline(prices, is_positive=True, width=100, height=20):
     if not prices or len(prices) < 2:
         return ""
     min_p, max_p = min(prices), max(prices)
@@ -202,7 +201,7 @@ def fmt_mcap(val):
     return f"${val / 1e6:.2f}M"
 
 # ---------------------------------------------------------
-# 1. TOP BENCHMARK RIBBON (NO TRUNCATION / NO ELLIPSIS)
+# 1. TOP MACRO & SECTOR BENCHMARK RIBBON
 # ---------------------------------------------------------
 st.markdown("### 🌐 REAL-TIME SECTOR INTELLIGENCE & MOMENTUM DASHBOARD")
 st.markdown("<p style='font-size:12px; color:#57606A; margin-top:-10px;'>GICS Sector SPDR Benchmarks • Interactive Sector Explorer • Top Market Cap Giants • Top Momentum Gainers</p>", unsafe_allow_html=True)
@@ -232,23 +231,11 @@ for ticker, label in benchmarks_meta:
         d = bench_data[ticker]
         color = "#137333" if d["change_pct"] >= 0 else "#C5221F"
         sign = "+" if d["change_pct"] >= 0 else ""
-        bench_html += f"""
-        <div class="bench-card">
-            <div class="bench-title">{label}</div>
-            <div class="bench-price" style="color: {color};">
-                ${d['price']:.2f} ({sign}{d['change_pct']:.2f}%)
-            </div>
-        </div>
-        """
+        bench_html += f'<div class="bench-card"><div class="bench-title">{label}</div><div class="bench-price" style="color: {color};">${d["price"]:.2f} ({sign}{d["change_pct"]:.2f}%)</div></div>'
     else:
-        bench_html += f"""
-        <div class="bench-card">
-            <div class="bench-title">{label}</div>
-            <div class="bench-price" style="color: #57606A;">--</div>
-        </div>
-        """
+        bench_html += f'<div class="bench-card"><div class="bench-title">{label}</div><div class="bench-price" style="color: #57606A;">--</div></div>'
 bench_html += '</div>'
-st.markdown(bench_html, unsafe_allow_html=True)
+render_html(bench_html)
 
 # ---------------------------------------------------------
 # TABS SETUP
@@ -306,19 +293,12 @@ with tab_sector:
     if rows:
         col_l, col_r = st.columns(2)
 
-        # 1. TOP MARKET CAP TABLE
+        # 1. TOP MARKET CAP LEADERS
         with col_l:
             sorted_mcap = sorted(rows, key=lambda x: (x["mcap"] or 0), reverse=True)
-            tbl_html = """
-            <div class="section-banner">TOP MARKET CAP LEADERS</div>
-            <table class="sheet-table">
-                <thead>
-                    <tr>
-                        <th>Ticker</th><th>Company Name</th><th>Price</th><th>Change ($)</th><th>Change (%)</th><th>30D Gain</th><th>Market Cap</th><th>P/E</th><th>Momentum</th><th>30-Day Trend</th>
-                    </tr>
-                </thead>
-                <tbody>
-            """
+            tbl_html = '<div style="overflow-x: auto; margin-bottom: 20px;">'
+            tbl_html += '<div class="section-banner">TOP 20 MARKET CAP LEADERS</div>'
+            tbl_html += '<table class="sheet-table"><thead><tr><th>Ticker</th><th>Company Name</th><th>Price</th><th>Change ($)</th><th>Change (%)</th><th>30D Gain</th><th>Market Cap</th><th>P/E</th><th>Momentum</th><th>30-Day Trend</th></tr></thead><tbody>'
             for r in sorted_mcap:
                 c_dlr = "pos-cell" if r["chg_dlr"] >= 0 else "neg-cell"
                 c_pct = "pos-cell" if r["chg_pct"] >= 0 else "neg-cell"
@@ -329,36 +309,16 @@ with tab_sector:
                 cue = '<span class="bullish-badge">▲ Bullish</span>' if r["bullish"] else '<span class="bearish-badge">▼ Bearish</span>'
                 spark = make_svg_sparkline(r["sparkline"], is_positive=(r["gain_30"] >= 0))
 
-                tbl_html += f"""
-                <tr>
-                    <td style="font-weight:600;">{r['ticker']}</td>
-                    <td style="max-width:130px; overflow:hidden; text-overflow:ellipsis;">{r['name']}</td>
-                    <td>${r['price']:.2f}</td>
-                    <td class="{c_dlr}">{s_dlr}${r['chg_dlr']:.2f}</td>
-                    <td class="{c_pct}">{s_pct}{r['chg_pct']:.2f}%</td>
-                    <td class="{c_30}">{s_30}{r['gain_30']:.2f}%</td>
-                    <td>{r['mcap_fmt']}</td>
-                    <td>{r['pe']}</td>
-                    <td style="text-align:center;">{cue}</td>
-                    <td>{spark}</td>
-                </tr>
-                """
-            tbl_html += "</tbody></table>"
-            st.markdown(tbl_html, unsafe_allow_html=True)
+                tbl_html += f'<tr><td style="font-weight:600;">{r["ticker"]}</td><td style="max-width:120px; overflow:hidden; text-overflow:ellipsis;">{r["name"]}</td><td>${r["price"]:.2f}</td><td class="{c_dlr}">{s_dlr}${r["chg_dlr"]:.2f}</td><td class="{c_pct}">{s_pct}{r["chg_pct"]:.2f}%</td><td class="{c_30}">{s_30}{r["gain_30"]:.2f}%</td><td>{r["mcap_fmt"]}</td><td>{r["pe"]}</td><td style="text-align:center;">{cue}</td><td>{spark}</td></tr>'
+            tbl_html += '</tbody></table></div>'
+            render_html(tbl_html)
 
-        # 2. TOP MOMENTUM TABLE
+        # 2. TOP 10 MOMENTUM LEADERS
         with col_r:
             sorted_mom = sorted(rows, key=lambda x: x["gain_30"], reverse=True)[:10]
-            tbl_html2 = """
-            <div class="section-banner">TOP 10 30-DAY GAINERS (MOMENTUM LEADERS)</div>
-            <table class="sheet-table">
-                <thead>
-                    <tr>
-                        <th>Ticker</th><th>Company Name</th><th>Price</th><th>30D Gain</th><th>Today Change</th><th>Market Cap</th><th>Momentum</th><th>30-Day Trend</th>
-                    </tr>
-                </thead>
-                <tbody>
-            """
+            tbl_html2 = '<div style="overflow-x: auto; margin-bottom: 20px;">'
+            tbl_html2 += '<div class="section-banner">TOP 10 30-DAY GAINERS (MOMENTUM LEADERS)</div>'
+            tbl_html2 += '<table class="sheet-table"><thead><tr><th>Ticker</th><th>Company Name</th><th>Price</th><th>30D Gain</th><th>Today Change</th><th>Market Cap</th><th>Momentum</th><th>30-Day Trend</th></tr></thead><tbody>'
             for r in sorted_mom:
                 c_pct = "pos-cell" if r["chg_pct"] >= 0 else "neg-cell"
                 c_30 = "pos-cell" if r["gain_30"] >= 0 else "neg-cell"
@@ -367,20 +327,9 @@ with tab_sector:
                 cue = '<span class="bullish-badge">▲ Bullish</span>' if r["bullish"] else '<span class="bearish-badge">▼ Bearish</span>'
                 spark = make_svg_sparkline(r["sparkline"], is_positive=(r["gain_30"] >= 0))
 
-                tbl_html2 += f"""
-                <tr>
-                    <td style="font-weight:600;">{r['ticker']}</td>
-                    <td style="max-width:130px; overflow:hidden; text-overflow:ellipsis;">{r['name']}</td>
-                    <td>${r['price']:.2f}</td>
-                    <td class="{c_30}">{s_30}{r['gain_30']:.2f}%</td>
-                    <td class="{c_pct}">{s_pct}{r['chg_pct']:.2f}%</td>
-                    <td>{r['mcap_fmt']}</td>
-                    <td style="text-align:center;">{cue}</td>
-                    <td>{spark}</td>
-                </tr>
-                """
-            tbl_html2 += "</tbody></table>"
-            st.markdown(tbl_html2, unsafe_allow_html=True)
+                tbl_html2 += f'<tr><td style="font-weight:600;">{r["ticker"]}</td><td style="max-width:120px; overflow:hidden; text-overflow:ellipsis;">{r["name"]}</td><td>${r["price"]:.2f}</td><td class="{c_30}">{s_30}{r["gain_30"]:.2f}%</td><td class="{c_pct}">{s_pct}{r["chg_pct"]:.2f}%</td><td>{r["mcap_fmt"]}</td><td style="text-align:center;">{cue}</td><td>{spark}</td></tr>'
+            tbl_html2 += '</tbody></table></div>'
+            render_html(tbl_html2)
 
 # ---------------------------------------------------------
 # 3. COMMODITIES TAB
@@ -408,20 +357,13 @@ COMMODITIES_REGISTRY = [
 ]
 
 with tab_commodities:
-    st.markdown('<div class="section-banner">COMMODITY & DERIVATIVE FUTURES (ENERGY, METALS, AG & LEVERAGED FUNDS)</div>', unsafe_allow_html=True)
-    
     comm_tickers = [c["ticker"] for c in COMMODITIES_REGISTRY]
     comm_data = fetch_ticker_data(comm_tickers)
 
-    comm_html = """
-    <table class="sheet-table">
-        <thead>
-            <tr>
-                <th>Commodity Group</th><th>Underlying Benchmark</th><th>Ticker</th><th>Fund Name</th><th>Exposure / Leverage</th><th>Current Price</th><th>Change ($)</th><th>Change (%)</th><th>Day Range</th><th>9 EMA</th><th>21 EMA</th><th>30D Gain</th><th>Volume</th><th>Expense</th><th>Momentum</th><th>30-Day Trend</th>
-            </tr>
-        </thead>
-        <tbody>
-    """
+    comm_html = '<div style="overflow-x: auto; margin-top: 10px;">'
+    comm_html += '<div class="section-banner">COMMODITY & DERIVATIVE FUTURES (ENERGY, METALS, AG & LEVERAGED FUNDS)</div>'
+    comm_html += '<table class="sheet-table"><thead><tr><th>Commodity Group</th><th>Underlying Benchmark</th><th>Ticker</th><th>Fund Name</th><th>Exposure / Leverage</th><th>Current Price</th><th>Change ($)</th><th>Change (%)</th><th>Day Range</th><th>9 EMA</th><th>21 EMA</th><th>30D Gain</th><th>Volume</th><th>Expense</th><th>Momentum</th><th>30-Day Trend</th></tr></thead><tbody>'
+    
     for c in COMMODITIES_REGISTRY:
         t = c["ticker"]
         if t in comm_data:
@@ -435,25 +377,12 @@ with tab_commodities:
             cue = '<span class="bullish-badge">▲ Bullish</span>' if d["bullish"] else '<span class="bearish-badge">▼ Bearish</span>'
             spark = make_svg_sparkline(d["sparkline"], is_positive=(d["gain_30"] >= 0))
 
-            comm_html += f"""
-            <tr>
-                <td>{c['group']}</td>
-                <td>{c['benchmark']}</td>
-                <td style="font-weight:600;">{t}</td>
-                <td>{c['name']}</td>
-                <td>{c['leverage']}</td>
-                <td>${d['price']:.2f}</td>
-                <td class="{c_dlr}">{s_dlr}${d['change_dlr']:.2f}</td>
-                <td class="{c_pct}">{s_pct}{d['change_pct']:.2f}%</td>
-                <td>${d['day_low']:.2f} - ${d['day_high']:.2f}</td>
-                <td>${d['ema_9']:.2f}</td>
-                <td>${d['ema_21']:.2f}</td>
-                <td class="{c_30}">{s_30}{d['gain_30']:.2f}%</td>
-                <td>{d['vol']:,}</td>
-                <td>{c['expense']}</td>
-                <td style="text-align:center;">{cue}</td>
-                <td>{spark}</td>
-            </tr>
-            """
-    comm_html += "</tbody></table>"
-    st.markdown(comm_html, unsafe_allow_html=True)
+            comm_html += f'<tr><td>{c["group"]}</td><td>{c["benchmark"]}</td><td style="font-weight:600;">{t}</td><td>{c["name"]}</td><td>{c["leverage"]}</td><td>${d["price"]:.2f}</td><td class="{c_dlr}">{s_dlr}${d["change_dlr"]:.2f}</td><td class="{c_pct}">{s_pct}{d["change_pct"]:.2f}%</td><td>${d["day_low"]:.2f} - ${d["day_high"]:.2f}</td><td>${d["ema_9"]:.2f}</td><td>${d["ema_21"]:.2f}</td><td class="{c_30}">{s_30}{d["gain_30"]:.2f}%</td><td>{d["vol"]:,}</td><td>{c["expense"]}</td><td style="text-align:center;">{cue}</td><td>{spark}</td></tr>'
+    comm_html += '</tbody></table></div>'
+    render_html(comm_html)
+
+# Sidebar utilities
+st.sidebar.markdown("### Controls")
+if st.sidebar.button("🔄 Force Refresh Data"):
+    st.cache_data.clear()
+    st.rerun()
