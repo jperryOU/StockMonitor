@@ -200,7 +200,7 @@ css_styling = f"""
         color: {thm['text_color']} !important;
     }}
     
-    /* FIX FOR SELECTBOXES */
+    /* UNIVERSAL SELECTBOX FIX */
     div[data-testid="stSelectbox"] div[data-baseweb="select"],
     div[data-testid="stSelectbox"] div[data-baseweb="select"] > div,
     div[data-baseweb="select"],
@@ -251,7 +251,7 @@ css_styling = f"""
         border-color: {thm['banner_text']} !important;
     }}
 
-    /* Clean Terminal Typography */
+    /* Table Typography & Colors */
     h1, h2, h3, h4, h5, h6, p, span, label {{
         color: {thm['text_color']} !important;
         font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif !important;
@@ -411,9 +411,9 @@ css_styling = f"""
 render_html(css_styling)
 
 # ---------------------------------------------------------
-# DYNAMIC S&P 500 CONSTITUENT SCRAPER (LIVE MARKET UNIVERSE)
+# DYNAMIC S&P 500 CONSTITUENT SCRAPER
 # ---------------------------------------------------------
-@st.cache_data(ttl=43200)  # Refreshes every 12 hours
+@st.cache_data(ttl=43200)
 def get_live_sp500_sectors():
     url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
     headers = {
@@ -429,7 +429,6 @@ def get_live_sp500_sectors():
             sector_dict[sector] = group["Symbol"].tolist()
         return sector_dict
     except Exception:
-        # Fallback if network blocks Wikipedia table
         return {
             "Information Technology": ["AAPL", "MSFT", "NVDA", "AVGO", "ORCL", "CRM", "AMD", "QCOM", "ADBE", "CSCO", "ACN", "TXN", "INTU", "NOW", "AMAT", "MU", "ADI", "LRCX", "KLAC", "PANW", "SNPS", "CDNS", "MRVL"],
             "Health Care": ["LLY", "UNH", "JNJ", "ABBV", "MRK", "TMO", "ABT", "ISRG", "PFE", "DHR", "BMY", "AMGN", "GILD", "VRTX", "MDT", "SYK", "ELV", "BSX", "CI", "REGN", "BDX", "ZTS"],
@@ -447,7 +446,7 @@ def get_live_sp500_sectors():
 SECTOR_DATASETS = get_live_sp500_sectors()
 
 # ---------------------------------------------------------
-# LIVE MOVERS SCREENER (FAST BATCH EVALUATION)
+# LIVE MOVERS SCREENER
 # ---------------------------------------------------------
 @st.cache_data(ttl=300)
 def rank_live_sector_stocks(sector_tickers, mode="Top Movers Today (Largest % Swings)"):
@@ -648,10 +647,11 @@ st.markdown("<div style='height:4px;'></div>", unsafe_allow_html=True)
 # ---------------------------------------------------------
 # TABS SETUP
 # ---------------------------------------------------------
-tab_portfolio, tab_sector, tab_scatter, tab_commodities, tab_glossary = st.tabs([
+tab_portfolio, tab_sector, tab_scatter, tab_rankings, tab_commodities, tab_glossary = st.tabs([
     "PORTFOLIO POSITIONS",
     "SECTOR INTELLIGENCE",
     "MOMENTUM SCATTER MATRIX",
+    "COMPOSITE FACTOR RANKINGS",
     "COMMODITIES & DERIVATIVES",
     "TERMINAL GLOSSARY"
 ])
@@ -665,7 +665,6 @@ def load_portfolio_holdings():
     csv_files = glob.glob("Portfolio_Positions*.csv")
     if not csv_files:
         return []
-    
     try:
         df = pd.read_csv(csv_files[0], on_bad_lines='skip')
     except Exception:
@@ -793,7 +792,6 @@ with tab_portfolio:
         k4.metric("TOTAL COST BASIS", f"${total_cost_basis:,.2f}")
         
         st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
-        
         port_rows = sorted(port_rows, key=lambda x: x["mval"], reverse=True)
         
         port_html = f"""
@@ -877,7 +875,7 @@ with tab_portfolio:
         st.info("NO PORTFOLIO POSITIONS AVAILABLE.")
 
 # ---------------------------------------------------------
-# TAB 2: SECTOR EXPLORER (DYNAMIC S&P 500 CONSTITUENTS)
+# TAB 2: SECTOR EXPLORER
 # ---------------------------------------------------------
 with tab_sector:
     col_sel, col_tgl_f, col_tgl_t = st.columns([1.5, 1, 1.2])
@@ -1013,9 +1011,7 @@ METRIC_REGISTRY = {
 with tab_scatter:
     st.markdown("<div class='section-banner'>LIVE MARKET MATRIX // DYNAMIC CONSTITUENT EXPLORER</div>", unsafe_allow_html=True)
     
-    # Row 1: Sector Universe, Live Screener Mode, Stock Count Stepper, Custom Tickers
     r1_col1, r1_col2, r1_col3, r1_col4 = st.columns([1.2, 1.3, 1, 1.2])
-    
     with r1_col1:
         scatter_sector = st.selectbox(
             "SELECT SECTOR FOR MATRIX", 
@@ -1035,16 +1031,14 @@ with tab_scatter:
             index=0
         )
     with r1_col3:
-        # Step Slider: Lets you dial up/down stocks in increments of 5 or 10
         stock_count = st.select_slider(
             "STOCKS TO DISPLAY",
             options=[5, 10, 15, 20, 25, 30, 40, 50],
-            value=20
+            value=40
         )
     with r1_col4:
         custom_input = st.text_input("ADD CUSTOM TICKERS (COMMA-SEPARATED)", placeholder="e.g. PLTR, SMCI, TSM")
 
-    # Row 2: Metric Mapping Dropdowns with Context in Parentheses
     r2_col1, r2_col2, r2_col3, r2_col4 = st.columns(4)
 
     x_opts = [
@@ -1091,12 +1085,10 @@ with tab_scatter:
         size_label = st.selectbox("BUBBLE SIZE", size_opts, index=0)
         size_col = METRIC_REGISTRY[size_label]
 
-    # Dynamically pull the entire sector pool from live S&P 500
     all_sector_tickers = SECTOR_DATASETS[scatter_sector]
     ranked_tickers = rank_live_sector_stocks(all_sector_tickers, mode=screener_mode)
     selected_matrix_tickers = ranked_tickers[:int(stock_count)]
 
-    # Merge custom user tickers if provided
     if custom_input:
         extra_tickers = [t.strip().upper() for t in custom_input.split(",") if t.strip()]
         active_matrix_tickers = list(dict.fromkeys(selected_matrix_tickers + extra_tickers))
@@ -1208,7 +1200,160 @@ with tab_scatter:
         st.info("NO DATA AVAILABLE FOR SELECTED MATRIX.")
 
 # ---------------------------------------------------------
-# TAB 4: COMMODITIES TAB
+# TAB 4: COMPOSITE FACTOR RANKING LEADERBOARD (NEW)
+# ---------------------------------------------------------
+with tab_rankings:
+    st.markdown("<div class='section-banner'>MULTI-FACTOR COMPOSITE LEADERBOARD // QUANTITATIVE FACTOR SCORING</div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<p style='font-size:11.5px; color:{thm['card_border']}; margin-top:4px; margin-bottom:12px;'>"
+        f"Each constituent is ranked from 1 to N across 6 metrics (30D Momentum, RS vs SPY Alpha, RVOL, 14D RSI, Forward P/E, PEG Ratio). "
+        f"<b>Lowest Average Score = #1 Ranked Stock</b> (Rank 1.0 is the best possible score)."
+        f"</p>",
+        unsafe_allow_html=True
+    )
+
+    rk_col1, rk_col2, rk_col3 = st.columns([1.5, 1.2, 1.2])
+    with rk_col1:
+        rank_sector = st.selectbox(
+            "SELECT SECTOR FOR RANKINGS",
+            list(SECTOR_DATASETS.keys()),
+            index=list(SECTOR_DATASETS.keys()).index(st.session_state.selected_sector),
+            key="rank_sector_sel"
+        )
+    with rk_col2:
+        rank_stock_count = st.select_slider(
+            "STOCKS TO EVALUATE",
+            options=[10, 20, 30, 40, 50],
+            value=40,
+            key="rank_count_slider"
+        )
+    with rk_col3:
+        rank_custom_input = st.text_input(
+            "ADD CUSTOM TICKERS TO POOL",
+            placeholder="e.g. PLTR, SMCI, TSM",
+            key="rank_custom_txt"
+        )
+
+    all_rank_tickers = SECTOR_DATASETS[rank_sector][:int(rank_stock_count)]
+    if rank_custom_input:
+        extras = [t.strip().upper() for t in rank_custom_input.split(",") if t.strip()]
+        eval_tickers = list(dict.fromkeys(all_rank_tickers + extras))
+    else:
+        eval_tickers = all_rank_tickers
+
+    eval_data = fetch_ticker_data(eval_tickers)
+
+    rank_raw = []
+    for t in eval_tickers:
+        if t in eval_data:
+            d = eval_data[t]
+            rs_spy = d["gain_30"] - spy_gain_30
+            rank_raw.append({
+                "ticker": t,
+                "name": d["name"],
+                "price": d["price"],
+                "gain_30": d["gain_30"],
+                "rs_spy": rs_spy,
+                "rvol": d["rvol"] if d["rvol"] else 1.0,
+                "rsi": d["rsi"] if d["rsi"] else 50.0,
+                "fwd_pe": d["fwd_pe"] if (d["fwd_pe"] and d["fwd_pe"] > 0) else 9999.0,
+                "fwd_pe_disp": f"{d['fwd_pe']:.1f}" if (d["fwd_pe"] and d["fwd_pe"] > 0) else "--",
+                "peg": d["peg_ratio"] if (d["peg_ratio"] and d["peg_ratio"] > 0) else 999.0,
+                "peg_disp": f"{d['peg_ratio']:.2f}" if (d["peg_ratio"] and d["peg_ratio"] > 0) else "--",
+                "mcap_fmt": fmt_mcap(d["market_cap"]),
+                "bullish": d["bullish"],
+                "sparkline": d["sparkline"]
+            })
+
+    if rank_raw:
+        df_rank = pd.DataFrame(rank_raw)
+        
+        # Calculate quantitative ranks (1 = best)
+        df_rank["r_mom"] = df_rank["gain_30"].rank(ascending=False, method="min").astype(int)
+        df_rank["r_alpha"] = df_rank["rs_spy"].rank(ascending=False, method="min").astype(int)
+        df_rank["r_rvol"] = df_rank["rvol"].rank(ascending=False, method="min").astype(int)
+        df_rank["r_rsi"] = df_rank["rsi"].rank(ascending=False, method="min").astype(int)
+        df_rank["r_val"] = df_rank["fwd_pe"].rank(ascending=True, method="min").astype(int)
+        df_rank["r_peg"] = df_rank["peg"].rank(ascending=True, method="min").astype(int)
+
+        # Composite score = average rank across the 6 factors
+        rank_cols = ["r_mom", "r_alpha", "r_rvol", "r_rsi", "r_val", "r_peg"]
+        df_rank["composite_score"] = df_rank[rank_cols].mean(axis=1)
+        df_rank = df_rank.sort_values(by="composite_score", ascending=True).reset_index(drop=True)
+        df_rank["final_rank"] = df_rank.index + 1
+
+        # Summary KPI Cards for Top 3
+        top_cols = st.columns(3)
+        for idx in range(min(3, len(df_rank))):
+            with top_cols[idx]:
+                leader = df_rank.iloc[idx]
+                st.metric(
+                    label=f"RANK #{leader['final_rank']} LEADER // {leader['ticker']}",
+                    value=f"Score: {leader['composite_score']:.1f}",
+                    delta=f"{leader['gain_30']:+.1f}% 30D | RVOL {leader['rvol']:.2f}x"
+                )
+
+        st.markdown("<div style='height:12px;'></div>", unsafe_allow_html=True)
+
+        # Leaderboard Table HTML
+        rk_html = f"""
+        <div style="overflow-x: auto; margin-bottom: 20px;">
+        <table class="sheet-table">
+            <thead>
+                <tr>
+                    <th style="text-align:center;">RANK</th>
+                    <th>TICKER</th>
+                    <th>ASSET NAME</th>
+                    <th style="text-align:center; background-color:{thm['banner_bg']}; color:{thm['banner_text']};">AVG SCORE</th>
+                    <th>PRICE</th>
+                    <th>30D MOM (RNK)</th>
+                    <th>RS ALPHA (RNK)</th>
+                    <th>RVOL (RNK)</th>
+                    <th>14D RSI (RNK)</th>
+                    <th>FWD P/E (RNK)</th>
+                    <th>PEG (RNK)</th>
+                    <th>MKT CAP</th>
+                    <th style="text-align:center;">30D TREND</th>
+                </tr>
+            </thead>
+            <tbody>
+        """
+        for _, row in df_rank.iterrows():
+            c_mom = "pos-cell" if row["gain_30"] >= 0 else "neg-cell"
+            c_alpha = "pos-cell" if row["rs_spy"] >= 0 else "neg-cell"
+            c_score = "pos-cell" if row["final_rank"] <= (len(df_rank) // 3) else ""
+            spark = make_svg_sparkline(row["sparkline"], is_positive=(row["gain_30"] >= 0))
+            badge_color = thm["badge_bull_bg"] if row["final_rank"] <= 3 else thm["card_bg"]
+            badge_text = "#FFFFFF" if row["final_rank"] <= 3 else thm["text_color"]
+
+            rk_html += f"""
+            <tr>
+                <td style="text-align:center; font-weight:800; background-color:{badge_color}; color:{badge_text};">#{row['final_rank']}</td>
+                <td style="font-weight:700;">{row['ticker']}</td>
+                <td style="max-width:120px; overflow:hidden; text-overflow:ellipsis;">{row['name']}</td>
+                <td class="{c_score}" style="text-align:center; font-weight:800; font-size:12.5px;">{row['composite_score']:.1f}</td>
+                <td>${row['price']:.2f}</td>
+                <td class="{c_mom}">{row['gain_30']:+.1f}% (#{row['r_mom']})</td>
+                <td class="{c_alpha}">{row['rs_spy']:+.1f}% (#{row['r_alpha']})</td>
+                <td>{row['rvol']:.2f}x (#{row['r_rvol']})</td>
+                <td>{row['rsi']:.1f} (#{row['r_rsi']})</td>
+                <td>{row['fwd_pe_disp']} (#{row['r_val']})</td>
+                <td>{row['peg_disp']} (#{row['r_peg']})</td>
+                <td>{row['mcap_fmt']}</td>
+                <td style="text-align:center;">{spark}</td>
+            </tr>
+            """
+        rk_html += """
+            </tbody>
+        </table>
+        </div>
+        """
+        render_html(rk_html)
+    else:
+        st.info("NO STOCKS AVAILABLE TO RANK IN THIS CONFIGURATION.")
+
+# ---------------------------------------------------------
+# TAB 5: COMMODITIES TAB
 # ---------------------------------------------------------
 COMMODITIES_REGISTRY = [
     {"group": "Crude Oil", "benchmark": "WTI Light Sweet Crude", "ticker": "USO", "name": "United States Oil Fund LP", "leverage": "1x Spot / Front-Month", "expense": "0.60%"},
@@ -1258,35 +1403,36 @@ with tab_commodities:
     render_html(comm_html)
 
 # ---------------------------------------------------------
-# TAB 5: TERMINAL GLOSSARY & REFERENCE GUIDE (ZERO EMOJIS)
+# TAB 6: TERMINAL GLOSSARY & REFERENCE GUIDE (ZERO EMOJIS)
 # ---------------------------------------------------------
 with tab_glossary:
     st.markdown("<div class='section-banner'>TERMINAL GLOSSARY // INSTITUTIONAL VALUATION & METRIC REFERENCE</div>", unsafe_allow_html=True)
     
     g_col1, g_col2 = st.columns(2)
+    
     with g_col1:
-        st.markdown("""
+        st.markdown(f"""
         ### VALUATION & MULTIPLES
         * **Trailing P/E (Price-to-Earnings):** Current share price divided by actual net income per share over the trailing 12 months (TTM). Backward-looking, but audited.
         * **Forward P/E:** Current share price divided by Wall Street consensus EPS estimates over the upcoming 12 months. Highlights whether earnings are expected to expand (compressing the multiple) or contract.
-        * **PEG Ratio (Price/Earnings-to-Growth):** $\\text{P/E Ratio} \\div \\text{Annual Expected EPS Growth Rate}$. A PEG under **1.0** traditionally indicates a company is undervalued relative to its growth trajectory.
-        * **Market Capitalization (Cap):** Total equity value of a firm ($\\text{Shares Outstanding} \\times \\text{Share Price}$). Categorized as Mega-Cap ($200B+), Large-Cap ($10B–$200B), Mid-Cap ($2B–$10B), and Small-Cap (<$2B).
+        * **PEG Ratio (Price/Earnings-to-Growth):** $\\text{{P/E Ratio}} \\div \\text{{Annual Expected EPS Growth Rate}}$. A PEG under **1.0** traditionally indicates a company is undervalued relative to its growth trajectory.
+        * **Market Capitalization (Cap):** Total equity value of a firm ($\\text{{Shares Outstanding}} \\times \\text{{Share Price}}$). Categorized as Mega-Cap ($200B+), Large-Cap ($10B–$200B), Mid-Cap ($2B–$10B), and Small-Cap (<$2B).
 
         ---
 
         ### EARNINGS & ACCOUNTING STANDARDS
-        * **EPS (Earnings Per Share):** The net portion of a company's profit allocated to each share of common stock ($\\text{Net Income} \\div \\text{Shares Outstanding}$).
+        * **EPS (Earnings Per Share):** The net portion of a company's profit allocated to each share of common stock ($\\text{{Net Income}} \\div \\text{{Shares Outstanding}}$).
         * **GAAP Net Income:** Earnings calculated under strict, standardized Generally Accepted Accounting Principles. Mandatory for official SEC 10-K/10-Q filings.
         * **Non-GAAP ("Adjusted") Earnings:** Operational metrics reported by management that remove non-cash expenses (e.g., stock-based compensation, goodwill impairments) to portray core recurring profitability. Tech and SaaS firms frequently look profitable on Non-GAAP while technically losing money on a GAAP basis.
         """)
         
     with g_col2:
-        st.markdown("""
+        st.markdown(f"""
         ### ADVANCED TECHNICAL INDICATORS & SIGNALS
         * **14D RSI (Relative Strength Index):** Velocity oscillator measured from 0 to 100. Readings above **70** indicate overbought/extended conditions; readings below **30** indicate oversold washouts. Healthy growth stocks typically hold support between **45 and 55** during pullbacks.
         * **50D Spread (% Distance from 50 SMA):** Quantitative extension relative to the institutional 50-day moving average. Positive values confirm an ongoing uptrend; values exceeding **+12% to +15%** flag severe overextension where institutional buying typically pauses.
         * **RVOL (Relative Volume):** Ratio of today's volume to the 20-day historical average. An RVOL above **1.50x** confirms heavy institutional participation and authentic breakouts/rotations, while an RVOL below **0.70x** signals low-conviction chop.
-        * **RS vs. SPY (30D Alpha):** Net 30-day percentage outperformance against the S&P 500 ($\\text{Stock 30D \\%} - \\text{SPY 30D \\%}$). Positive values highlight the true leaders attracting rotated institutional capital.
+        * **RS vs. SPY (30D Alpha):** Net 30-day percentage outperformance against the S&P 500 ($\\text{{Stock 30D \\%}} - \\text{{SPY 30D \\%}}$). Positive values highlight the true leaders attracting rotated institutional capital.
         * **9 & 21 EMA Signal:** Short-term trend confirmation. Marked **BULL** when the fast 9 EMA holds above the 21 EMA, and **BEAR** when short-term momentum breaks down.
         * **Beta ($\\beta$):** Systematic market sensitivity (S&P 500 = 1.0). A Beta of 1.8 indicates the asset moves with nearly 80% higher amplitude than the broader index.
         """)
