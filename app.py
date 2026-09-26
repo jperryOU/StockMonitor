@@ -323,13 +323,18 @@ with tab_portfolio:
     
     portfolio_holdings = load_portfolio_holdings()
     
-    # Debug / Status indicator
-    import glob
-    csv_found = glob.glob("Portfolio_Positions*.csv")
-    if csv_found:
-        st.sidebar.success(f"Loaded CSV: {csv_found[0]} ({len(portfolio_holdings)} positions)")
+
+
+
+
+
+    # Debug info right in the main window so you can see what's loaded
+    st.write(f"**Debug Info:** Loaded **{len(portfolio_holdings)}** positions from CSV.")
+    if portfolio_holdings:
+        st.write("Holdings detected:", [h['ticker'] for h in portfolio_holdings])
     else:
-        st.sidebar.warning("No CSV found; using fallback portfolio.")
+
+        st.warning("No holdings parsed from CSV. Showing fallback portfolio.")
     
     # Fallback if no CSV found
     if not portfolio_holdings:
