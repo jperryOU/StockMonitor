@@ -2,6 +2,7 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import plotly.express as px
 
 st.set_page_config(
     page_title="SECTOR INTELLIGENCE & MOMENTUM TERMINAL",
@@ -302,9 +303,10 @@ st.markdown("<div style='height:4px;'></div>", unsafe_allow_html=True)
 # ---------------------------------------------------------
 # TABS SETUP
 # ---------------------------------------------------------
-tab_portfolio, tab_sector, tab_commodities = st.tabs([
+tab_portfolio, tab_sector, tab_scatter, tab_commodities = st.tabs([
     "PORTFOLIO POSITIONS",
     "SECTOR INTELLIGENCE",
+    "MOMENTUM SCATTER MATRIX",
     "COMMODITIES & DERIVATIVES"
 ])
 
@@ -458,10 +460,8 @@ with tab_portfolio:
         
         st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
         
-        # Default sort descending by Market Value
         port_rows = sorted(port_rows, key=lambda x: x["mval"], reverse=True)
         
-        # Render Table with data-val attributes and instant client-side JS sort
         port_html = """
         <div style="overflow-x: auto; margin-bottom: 20px;">
         <table id="portfolio-table" class="sheet-table">
@@ -553,7 +553,7 @@ with tab_portfolio:
         st.info("NO PORTFOLIO POSITIONS AVAILABLE.")
 
 # ---------------------------------------------------------
-# TAB 2: SECTOR EXPLORER
+# SECTOR TICKER REGISTRY
 # ---------------------------------------------------------
 SECTOR_DATASETS = {
     "Information Technology": [
@@ -602,6 +602,9 @@ SECTOR_DATASETS = {
     ]
 }
 
+# ---------------------------------------------------------
+# TAB 2: SECTOR EXPLORER
+# ---------------------------------------------------------
 with tab_sector:
     col_sel, col_note = st.columns([1, 3])
     with col_sel:
@@ -677,7 +680,95 @@ with tab_sector:
             render_html(tbl_html2)
 
 # ---------------------------------------------------------
-# TAB 3: COMMODITIES TAB
+# TAB 3: MOMENTUM SCATTER MATRIX (30D GAIN vs. DAILY GAIN)
+# ---------------------------------------------------------
+with tab_scatter:
+    st.markdown("<div class='section-banner'>RELATIVE STRENGTH MATRIX // 30-DAY MOMENTUM vs. INTRADAY VELOCITY</div>", unsafe_allow_html=True)
+    
+    col_sc1, col_sc2 = st.columns([1, 3])
+    with col_sc1:
+        scatter_sector = st.selectbox("SELECT SECTOR FOR MATRIX", list(SECTOR_DATASETS.keys()), index=list(SECTOR_DATASETS.keys()).index(st.session_state.selected_sector))
+    with col_sc2:
+        st.markdown("<p style='font-size:11px; color:#475569; margin-top:28px;'>// QUADRANTS: TOP-RIGHT (SUSTAINED LEADERS) • TOP-LEFT (DAILY REVERSAL) • BOTTOM-RIGHT (CONSOLIDATING LEADERS) • BOTTOM-LEFT (LAGGARDS)</p>", unsafe_allow_html=True)
+
+    matrix_tickers = SECTOR_DATASETS[scatter_sector]
+    matrix_data = fetch_ticker_data(matrix_tickers)
+
+    plot_rows = []
+    for t in matrix_tickers:
+        if t in matrix_data:
+            d = matrix_data[t]
+            plot_rows.append({
+                "Ticker": t,
+                "Name": d["name"],
+                "30D Gain (%)": round(d["gain_30"], 2),
+                "Daily Gain (%)": round(d["change_pct"], 2),
+                "Price": f"${d['price']:.2f}",
+                "Market Cap": d["market_cap"] if (d["market_cap"] and not pd.isna(d["market_cap"])) else 1e9,
+                "Cap Label": fmt_mcap(d["market_cap"]),
+                "Status": "Bullish" if d["bullish"] else "Bearish"
+            })
+
+    if plot_rows:
+        df_plot = pd.DataFrame(plot_rows)
+
+        fig = px.scatter(
+            df_plot,
+            x="30D Gain (%)",
+            y="Daily Gain (%)",
+            text="Ticker",
+            size="Market Cap",
+            size_max=32,
+            color="Daily Gain (%)",
+            color_continuous_scale=["#B91C1C", "#64748B", "#15803D"],
+            color_continuous_midpoint=0.0,
+            hover_name="Name",
+            hover_data={
+                "Ticker": False,
+                "Price": True,
+                "30D Gain (%)": ":.2f",
+                "Daily Gain (%)": ":.2f",
+                "Cap Label": True,
+                "Market Cap": False
+            }
+        )
+
+        # Institutional Crosshair lines dividing the 4 quadrants
+        fig.add_hline(y=0, line_dash="dash", line_color="#475569", line_width=1.2)
+        fig.add_vline(x=0, line_dash="dash", line_color="#475569", line_width=1.2)
+
+        # Styling matching high-contrast terminal design
+        fig.update_traces(
+            textposition="top center",
+            textfont=dict(family="Inter, Segoe UI, sans-serif", size=11, color="#0F172A"),
+            marker=dict(line=dict(width=1.2, color="#0F172A"), opacity=0.9)
+        )
+
+        fig.update_layout(
+            height=620,
+            margin=dict(l=40, r=40, t=30, b=40),
+            plot_bgcolor="#F8FAFC",
+            paper_bgcolor="#FFFFFF",
+            font=dict(family="Inter, Segoe UI, sans-serif", size=11, color="#0F172A"),
+            xaxis=dict(
+                title=dict(text="<b>30-DAY RELATIVE GAIN (%)</b>", font=dict(size=12)),
+                gridcolor="#E2E8F0",
+                zeroline=False
+            ),
+            yaxis=dict(
+                title=dict(text="<b>TODAY'S INTRADAY RETURN (%)</b>", font=dict(size=12)),
+                gridcolor="#E2E8F0",
+                zeroline=False
+            ),
+            coloraxis_showscale=False
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("NO DATA AVAILABLE FOR SELECTED MATRIX.")
+
+# ---------------------------------------------------------
+# TAB 4: COMMODITIES TAB
 # ---------------------------------------------------------
 COMMODITIES_REGISTRY = [
     {"group": "Crude Oil", "benchmark": "WTI Light Sweet Crude", "ticker": "USO", "name": "United States Oil Fund LP", "leverage": "1x Spot / Front-Month", "expense": "0.60%"},
