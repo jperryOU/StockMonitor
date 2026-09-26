@@ -11,10 +11,154 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# SESSION STATE INITIALIZATION
+# SESSION STATE & THEME DEFINITIONS
 # ---------------------------------------------------------
 if "selected_sector" not in st.session_state:
     st.session_state.selected_sector = "Information Technology"
+if "theme_choice" not in st.session_state:
+    st.session_state.theme_choice = "Light (Classic)"
+
+THEMES = {
+    "Light (Classic)": {
+        "body_bg": "#FFFFFF",
+        "text_color": "#0F172A",
+        "card_bg": "#F8FAFC",
+        "card_border": "#475569",
+        "card_hover": "#E2E8F0",
+        "banner_bg": "#1E293B",
+        "banner_text": "#F8FAFC",
+        "banner_border": "#0F172A",
+        "th_bg": "#0F172A",
+        "th_text": "#F8FAFC",
+        "th_hover": "#1E293B",
+        "table_bg": "#FFFFFF",
+        "table_border": "#334155",
+        "td_border": "#CBD5E1",
+        "td_text": "#0F172A",
+        "tr_hover": "#F1F5F9",
+        "pos_bg": "#DCFCE7",
+        "pos_text": "#14532D",
+        "neg_bg": "#FEE2E2",
+        "neg_text": "#7F1D1D",
+        "badge_bull_bg": "#15803D",
+        "badge_bull_text": "#FFFFFF",
+        "badge_bear_bg": "#B91C1C",
+        "badge_bear_text": "#FFFFFF",
+        "tab_bg": "#E2E8F0",
+        "tab_text": "#0F172A",
+        "tab_active_bg": "#0F172A",
+        "tab_active_text": "#FFFFFF",
+        "metric_bg": "#F8FAFC",
+        "metric_border": "#475569",
+        "metric_label": "#475569",
+        "metric_val": "#0F172A",
+        "plotly_plot_bg": "#F8FAFC",
+        "plotly_paper_bg": "#FFFFFF",
+        "plotly_grid": "#E2E8F0",
+        "plotly_line": "#475569",
+        "spark_pos": "#15803D",
+        "spark_neg": "#B91C1C"
+    },
+    "Slate (Balanced)": {
+        "body_bg": "#1E293B",
+        "text_color": "#F8FAFC",
+        "card_bg": "#334155",
+        "card_border": "#64748B",
+        "card_hover": "#475569",
+        "banner_bg": "#0F172A",
+        "banner_text": "#38BDF8",
+        "banner_border": "#334155",
+        "th_bg": "#0F172A",
+        "th_text": "#F8FAFC",
+        "th_hover": "#1E293B",
+        "table_bg": "#1E293B",
+        "table_border": "#475569",
+        "td_border": "#334155",
+        "td_text": "#F1F5F9",
+        "tr_hover": "#334155",
+        "pos_bg": "#064E3B",
+        "pos_text": "#6EE7B7",
+        "neg_bg": "#7F1D1D",
+        "neg_text": "#FCA5A5",
+        "badge_bull_bg": "#059669",
+        "badge_bull_text": "#FFFFFF",
+        "badge_bear_bg": "#DC2626",
+        "badge_bear_text": "#FFFFFF",
+        "tab_bg": "#334155",
+        "tab_text": "#CBD5E1",
+        "tab_active_bg": "#0F172A",
+        "tab_active_text": "#38BDF8",
+        "metric_bg": "#334155",
+        "metric_border": "#64748B",
+        "metric_label": "#94A3B8",
+        "metric_val": "#F8FAFC",
+        "plotly_plot_bg": "#1E293B",
+        "plotly_paper_bg": "#1E293B",
+        "plotly_grid": "#334155",
+        "plotly_line": "#64748B",
+        "spark_pos": "#34D399",
+        "spark_neg": "#F87171"
+    },
+    "Dark (Terminal)": {
+        "body_bg": "#090D16",
+        "text_color": "#F3F4F6",
+        "card_bg": "#111827",
+        "card_border": "#374151",
+        "card_hover": "#1F2937",
+        "banner_bg": "#111827",
+        "banner_text": "#10B981",
+        "banner_border": "#374151",
+        "th_bg": "#030712",
+        "th_text": "#E5E7EB",
+        "th_hover": "#1F2937",
+        "table_bg": "#0B0F19",
+        "table_border": "#374151",
+        "td_border": "#1F2937",
+        "td_text": "#F3F4F6",
+        "tr_hover": "#1F2937",
+        "pos_bg": "#064E3B",
+        "pos_text": "#34D399",
+        "neg_bg": "#7F1D1D",
+        "neg_text": "#F87171",
+        "badge_bull_bg": "#10B981",
+        "badge_bull_text": "#000000",
+        "badge_bear_bg": "#EF4444",
+        "badge_bear_text": "#FFFFFF",
+        "tab_bg": "#111827",
+        "tab_text": "#9CA3AF",
+        "tab_active_bg": "#1F2937",
+        "tab_active_text": "#10B981",
+        "metric_bg": "#111827",
+        "metric_border": "#374151",
+        "metric_label": "#9CA3AF",
+        "metric_val": "#F9FAFB",
+        "plotly_plot_bg": "#0B0F19",
+        "plotly_paper_bg": "#0B0F19",
+        "plotly_grid": "#1F2937",
+        "plotly_line": "#4B5563",
+        "spark_pos": "#10B981",
+        "spark_neg": "#EF4444"
+    }
+}
+
+# ---------------------------------------------------------
+# SIDEBAR SETTINGS MENU
+# ---------------------------------------------------------
+st.sidebar.markdown("### SYSTEM SETTINGS")
+theme_select = st.sidebar.selectbox(
+    "TERMINAL THEME PRESET",
+    list(THEMES.keys()),
+    index=list(THEMES.keys()).index(st.session_state.theme_choice)
+)
+if theme_select != st.session_state.theme_choice:
+    st.session_state.theme_choice = theme_select
+    st.rerun()
+
+thm = THEMES[st.session_state.theme_choice]
+
+if st.sidebar.button("FORCE REFRESH DATA"):
+    st.cache_data.clear()
+    st.rerun()
 
 def render_html(html_code):
     clean = "\n".join(line.strip() for line in html_code.splitlines() if line.strip())
@@ -24,103 +168,112 @@ def render_html(html_code):
         st.markdown(clean, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# STYLING (READABLE INTER/SYSTEM FONT, ZERO ROUNDING)
+# DYNAMIC THEMED CSS (NO EMOJIS, SHARP RECTANGLES)
 # ---------------------------------------------------------
-css_styling = """
+css_styling = f"""
 <style>
-    .block-container {
+    .stApp {{
+        background-color: {thm['body_bg']} !important;
+        color: {thm['text_color']} !important;
+    }}
+    .block-container {{
         padding-top: 4.2rem !important;
         padding-bottom: 2rem !important;
         padding-left: 1.5rem !important;
         padding-right: 1.5rem !important;
         font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif !important;
-    }
-    .sheet-table {
+        background-color: {thm['body_bg']} !important;
+    }}
+    h1, h2, h3, h4, h5, h6, p, span, label {{
+        color: {thm['text_color']} !important;
+        font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif !important;
+    }}
+    .sheet-table {{
         width: 100%;
         border-collapse: collapse;
         font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
         font-size: 12px;
-        background-color: #FFFFFF;
-        border: 1px solid #334155;
+        background-color: {thm['table_bg']};
+        border: 1px solid {thm['table_border']};
         margin-bottom: 16px;
         font-variant-numeric: tabular-nums;
-    }
-    .sheet-table th {
-        background-color: #0F172A;
-        color: #F8FAFC;
+    }}
+    .sheet-table th {{
+        background-color: {thm['th_bg']};
+        color: {thm['th_text']};
         font-weight: 700;
         padding: 7px 8px;
-        border: 1px solid #334155;
+        border: 1px solid {thm['table_border']};
         text-align: left;
         white-space: nowrap;
         text-transform: uppercase;
         font-size: 11px;
         user-select: none;
-    }
-    .sortable-th {
+    }}
+    .sortable-th {{
         cursor: pointer;
         transition: background-color 0.15s ease;
-    }
-    .sortable-th:hover {
-        background-color: #1E293B !important;
+    }}
+    .sortable-th:hover {{
+        background-color: {thm['th_hover']} !important;
         color: #38BDF8 !important;
-    }
-    .sheet-table td {
+    }}
+    .sheet-table td {{
         padding: 5px 8px;
-        border: 1px solid #CBD5E1;
-        color: #0F172A;
+        border: 1px solid {thm['td_border']};
+        color: {thm['td_text']};
         white-space: nowrap;
-    }
-    .sheet-table tr:hover {
-        background-color: #F1F5F9;
-    }
-    .section-banner {
-        background-color: #1E293B;
-        color: #F8FAFC;
+    }}
+    .sheet-table tr:hover {{
+        background-color: {thm['tr_hover']};
+    }}
+    .section-banner {{
+        background-color: {thm['banner_bg']};
+        color: {thm['banner_text']};
         font-weight: 700;
         font-size: 11.5px;
         letter-spacing: 0.8px;
         padding: 6px 10px;
         border-radius: 0px !important;
-        border: 1px solid #0F172A;
+        border: 1px solid {thm['banner_border']};
         border-bottom: none;
         text-transform: uppercase;
-    }
-    .pos-cell {
-        background-color: #DCFCE7 !important;
-        color: #14532D !important;
+    }}
+    .pos-cell {{
+        background-color: {thm['pos_bg']} !important;
+        color: {thm['pos_text']} !important;
         font-weight: 700;
-    }
-    .neg-cell {
-        background-color: #FEE2E2 !important;
-        color: #7F1D1D !important;
+    }}
+    .neg-cell {{
+        background-color: {thm['neg_bg']} !important;
+        color: {thm['neg_text']} !important;
         font-weight: 700;
-    }
-    .bullish-badge {
-        background-color: #15803D;
-        color: #FFFFFF;
-        font-weight: 700;
-        padding: 2px 6px;
-        border-radius: 0px !important;
-        display: inline-block;
-        font-size: 10px;
-        text-transform: uppercase;
-    }
-    .bearish-badge {
-        background-color: #B91C1C;
-        color: #FFFFFF;
+    }}
+    .bullish-badge {{
+        background-color: {thm['badge_bull_bg']};
+        color: {thm['badge_bull_text']};
         font-weight: 700;
         padding: 2px 6px;
         border-radius: 0px !important;
         display: inline-block;
         font-size: 10px;
         text-transform: uppercase;
-    }
-    div[data-testid="column"] button {
+    }}
+    .bearish-badge {{
+        background-color: {thm['badge_bear_bg']};
+        color: {thm['badge_bear_text']};
+        font-weight: 700;
+        padding: 2px 6px;
         border-radius: 0px !important;
-        border: 1px solid #475569 !important;
-        background: #F8FAFC !important;
-        color: #0F172A !important;
+        display: inline-block;
+        font-size: 10px;
+        text-transform: uppercase;
+    }}
+    div[data-testid="column"] button {{
+        border-radius: 0px !important;
+        border: 1px solid {thm['card_border']} !important;
+        background: {thm['card_bg']} !important;
+        color: {thm['text_color']} !important;
         padding: 4px 1px !important;
         font-size: 10px !important;
         font-weight: 700 !important;
@@ -129,41 +282,41 @@ css_styling = """
         height: auto !important;
         white-space: pre-wrap !important;
         word-break: break-word !important;
-    }
-    div[data-testid="column"] button:hover {
-        background: #E2E8F0 !important;
-        border-color: #0F172A !important;
-    }
-    .stTabs [data-baseweb="tab"] {
+    }}
+    div[data-testid="column"] button:hover {{
+        background: {thm['card_hover']} !important;
+        border-color: {thm['banner_text']} !important;
+    }}
+    .stTabs [data-baseweb="tab"] {{
         border-radius: 0px !important;
         font-weight: 700;
         font-size: 11.5px;
         padding: 6px 16px;
-        border: 1px solid #475569;
-        background: #E2E8F0;
-        color: #0F172A;
-    }
-    .stTabs [aria-selected="true"] {
-        background: #0F172A !important;
-        color: #FFFFFF !important;
-        border-color: #0F172A !important;
-    }
-    div[data-testid="stMetric"] {
-        border: 1px solid #475569 !important;
+        border: 1px solid {thm['card_border']};
+        background: {thm['tab_bg']};
+        color: {thm['tab_text']};
+    }}
+    .stTabs [aria-selected="true"] {{
+        background: {thm['tab_active_bg']} !important;
+        color: {thm['tab_active_text']} !important;
+        border-color: {thm['tab_active_bg']} !important;
+    }}
+    div[data-testid="stMetric"] {{
+        border: 1px solid {thm['metric_border']} !important;
         padding: 8px 12px !important;
-        background: #F8FAFC !important;
+        background: {thm['metric_bg']} !important;
         border-radius: 0px !important;
-    }
-    div[data-testid="stMetricLabel"] {
+    }}
+    div[data-testid="stMetricLabel"] {{
         font-size: 11px !important;
         text-transform: uppercase !important;
         font-weight: 700 !important;
-        color: #475569 !important;
-    }
-    div[data-testid="stMetricValue"] {
+        color: {thm['metric_label']} !important;
+    }}
+    div[data-testid="stMetricValue"] {{
         font-weight: 800 !important;
-        color: #0F172A !important;
-    }
+        color: {thm['metric_val']} !important;
+    }}
 </style>
 """
 render_html(css_styling)
@@ -178,7 +331,6 @@ def fetch_ticker_data(tickers):
         try:
             ticker = t.strip().upper()
             stock = yf.Ticker(ticker)
-            # Pull 6mo data to ensure adequate bars for 50 SMA and 14 RSI calculations
             df = stock.history(period="6mo")
             if df.empty or len(df) < 22:
                 continue
@@ -188,15 +340,12 @@ def fetch_ticker_data(tickers):
             low = df["Low"].dropna()
             volume = df["Volume"].dropna()
 
-            # 1. EMAs
             ema_9 = close.ewm(span=9, adjust=False).mean()
             ema_21 = close.ewm(span=21, adjust=False).mean()
 
-            # 2. 30-Day Momentum
             hist_30 = close.iloc[-22:] if len(close) >= 22 else close
             gain_30 = ((close.iloc[-1] - hist_30.iloc[0]) / hist_30.iloc[0]) * 100
 
-            # 3. 14-Day RSI (Wilder's Smoothing)
             delta = close.diff()
             gain = delta.clip(lower=0)
             loss = -delta.clip(upper=0)
@@ -206,21 +355,18 @@ def fetch_ticker_data(tickers):
             rsi_series = 100.0 - (100.0 / (1.0 + rs))
             rsi_14 = float(rsi_series.iloc[-1]) if not pd.isna(rsi_series.iloc[-1]) else None
 
-            # 4. 50-Day SMA Extension
             if len(close) >= 50:
                 sma_50_val = close.rolling(50).mean().iloc[-1]
                 sma_50_dist = float(((close.iloc[-1] - sma_50_val) / sma_50_val) * 100) if sma_50_val > 0 else None
             else:
                 sma_50_dist = None
 
-            # 5. RVOL (Relative Volume vs. 20-Day Average)
             if len(volume) >= 21:
                 vol_prior_20 = volume.iloc[-21:-1].mean()
                 rvol = float(volume.iloc[-1] / vol_prior_20) if vol_prior_20 > 0 else 1.0
             else:
                 rvol = 1.0
 
-            # Fundamentals
             info = stock.info or {}
             market_cap = info.get("marketCap", None)
             pe_ratio = info.get("trailingPE", None)
@@ -272,7 +418,7 @@ def make_svg_sparkline(prices, is_positive=True, width=90, height=18):
         x = i * step
         y = height - ((p - min_p) / rng * (height - 4) + 2)
         pts.append(f"{x:.1f},{y:.1f}")
-    color = "#15803D" if is_positive else "#B91C1C"
+    color = thm["spark_pos"] if is_positive else thm["spark_neg"]
     return f'<svg width="{width}" height="{height}" style="display:block; margin:auto;"><polyline fill="none" stroke="{color}" stroke-width="1.6" points="{" ".join(pts)}"/></svg>'
 
 def fmt_mcap(val):
@@ -342,7 +488,7 @@ for i, ticker in enumerate(ALL_BENCH_TICKERS):
 st.markdown("<div style='height:4px;'></div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# TABS SETUP
+# TABS SETUP (ZERO EMOJIS)
 # ---------------------------------------------------------
 tab_portfolio, tab_sector, tab_scatter, tab_commodities, tab_glossary = st.tabs([
     "PORTFOLIO POSITIONS",
@@ -504,7 +650,7 @@ with tab_portfolio:
         
         port_rows = sorted(port_rows, key=lambda x: x["mval"], reverse=True)
         
-        port_html = """
+        port_html = f"""
         <div style="overflow-x: auto; margin-bottom: 20px;">
         <table id="portfolio-table" class="sheet-table">
             <thead>
@@ -593,7 +739,7 @@ with tab_portfolio:
         st.info("NO PORTFOLIO POSITIONS AVAILABLE.")
 
 # ---------------------------------------------------------
-# SECTOR TICKER REGISTRY
+# SECTOR DATASETS
 # ---------------------------------------------------------
 SECTOR_DATASETS = {
     "Information Technology": [
@@ -708,11 +854,9 @@ with tab_sector:
             if show_fundamentals:
                 html += f'<td>{r["fwd_pe"]}</td><td>{r["peg"]}</td><td>{r["beta"]}</td><td>{r["div"]}</td>'
             if show_technicals:
-                # RSI Cell
                 rsi_val = f'{r["rsi"]:.1f}' if r["rsi"] is not None else '--'
                 c_rsi = 'neg-cell' if (r["rsi"] and r["rsi"] >= 70) else ('pos-cell' if (r["rsi"] and r["rsi"] <= 30) else '')
                 
-                # 50D Spread Cell
                 if r["sma_50_dist"] is not None:
                     c_50 = "pos-cell" if r["sma_50_dist"] >= 0 else "neg-cell"
                     s_50 = "+" if r["sma_50_dist"] >= 0 else ""
@@ -720,11 +864,9 @@ with tab_sector:
                 else:
                     c_50, v_50 = "", "--"
                     
-                # RVOL Cell
                 rvol_val = f'{r["rvol"]:.2f}x' if r["rvol"] is not None else '--'
                 c_rvol = 'pos-cell' if (r["rvol"] and r["rvol"] >= 1.5) else ''
                 
-                # RS vs SPY Cell
                 c_rs = "pos-cell" if r["rs_spy"] >= 0 else "neg-cell"
                 s_rs = "+" if r["rs_spy"] >= 0 else ""
                 v_rs = f'{s_rs}{r["rs_spy"]:.1f}%'
@@ -773,8 +915,24 @@ with tab_sector:
             render_html(tbl_html2)
 
 # ---------------------------------------------------------
-# TAB 3: MOMENTUM SCATTER MATRIX (CONFIGURABLE AXES)
+# TAB 3: MOMENTUM SCATTER MATRIX (DESCRIPTIVE DROPDOWNS)
 # ---------------------------------------------------------
+METRIC_REGISTRY = {
+    # Label displayed in dropdown with helper context : DataFrame Column Name
+    "Daily Gain (%) (Today's percentage return)": "Daily Gain (%)",
+    "30D Gain (%) (Trailing 22-session momentum return)": "30D Gain (%)",
+    "RS vs SPY Alpha (%) (Compares stock return directly against SPY)": "RS vs SPY Alpha (%)",
+    "14D RSI (Momentum oscillator: >70 overbought, <30 oversold)": "14D RSI",
+    "50D SMA Spread (%) (% distance above/below institutional 50-day average)": "50D SMA Spread (%)",
+    "RVOL (Volume Multiplier) (Today's volume relative to 20-day historical average)": "RVOL (Volume Multiplier)",
+    "Forward P/E (Price-to-earnings based on next 12M expected EPS)": "Forward P/E",
+    "Trailing P/E (Price-to-earnings based on past 12M actual net earnings)": "Trailing P/E",
+    "PEG Ratio (P/E divided by growth rate; < 1.0 indicates undervalued growth)": "PEG Ratio",
+    "Beta (Risk) (Market volatility sensitivity; S&P 500 = 1.0)": "Beta (Risk)",
+    "Market Cap (Total corporate equity valuation size)": "Market Cap",
+    "Dividend Yield (%) (Annual cash dividend divided by share price)": "Dividend Yield (%)"
+}
+
 with tab_scatter:
     st.markdown("<div class='section-banner'>RELATIVE STRENGTH MATRIX // MULTI-DIMENSIONAL ANALYSIS</div>", unsafe_allow_html=True)
     
@@ -783,14 +941,49 @@ with tab_scatter:
     
     with col_sc1:
         scatter_sector = st.selectbox("SELECT SECTOR FOR MATRIX", list(SECTOR_DATASETS.keys()), index=list(SECTOR_DATASETS.keys()).index(st.session_state.selected_sector))
+    
+    x_opts = [
+        "30D Gain (%) (Trailing 22-session momentum return)",
+        "RS vs SPY Alpha (%) (Compares stock return directly against SPY)",
+        "50D SMA Spread (%) (% distance above/below institutional 50-day average)",
+        "14D RSI (Momentum oscillator: >70 overbought, <30 oversold)"
+    ]
     with col_x:
-        x_choice = st.selectbox("X-AXIS (MOMENTUM)", ["30D Gain (%)", "RS vs SPY Alpha (%)", "50D SMA Spread (%)", "14D RSI"], index=0)
+        x_label = st.selectbox("X-AXIS (MOMENTUM)", x_opts, index=0)
+        x_col = METRIC_REGISTRY[x_label]
+
+    y_opts = [
+        "Daily Gain (%) (Today's percentage return)",
+        "14D RSI (Momentum oscillator: >70 overbought, <30 oversold)",
+        "50D SMA Spread (%) (% distance above/below institutional 50-day average)",
+        "RVOL (Volume Multiplier) (Today's volume relative to 20-day historical average)"
+    ]
     with col_y:
-        y_choice = st.selectbox("Y-AXIS (VELOCITY)", ["Daily Gain (%)", "14D RSI", "50D SMA Spread (%)", "RVOL (Volume Multiplier)"], index=0)
+        y_label = st.selectbox("Y-AXIS (VELOCITY)", y_opts, index=0)
+        y_col = METRIC_REGISTRY[y_label]
+
+    color_opts = [
+        "Daily Gain (%) (Today's percentage return)",
+        "14D RSI (Momentum oscillator: >70 overbought, <30 oversold)",
+        "50D SMA Spread (%) (% distance above/below institutional 50-day average)",
+        "RVOL (Volume Multiplier) (Today's volume relative to 20-day historical average)",
+        "Forward P/E (Price-to-earnings based on next 12M expected EPS)",
+        "Trailing P/E (Price-to-earnings based on past 12M actual net earnings)",
+        "PEG Ratio (P/E divided by growth rate; < 1.0 indicates undervalued growth)",
+        "Beta (Risk) (Market volatility sensitivity; S&P 500 = 1.0)"
+    ]
     with col_color:
-        color_choice = st.selectbox("COLOR DIMENSION", ["Daily Gain (%)", "14D RSI", "50D SMA Spread (%)", "Relative Volume (RVOL)", "Forward P/E", "Trailing P/E", "PEG Ratio", "Beta (Risk)"], index=0)
+        color_label = st.selectbox("COLOR DIMENSION", color_opts, index=0)
+        color_col = METRIC_REGISTRY[color_label]
+
+    size_opts = [
+        "Market Cap (Total corporate equity valuation size)",
+        "RVOL (Volume Multiplier) (Today's volume relative to 20-day historical average)",
+        "Dividend Yield (%) (Annual cash dividend divided by share price)"
+    ]
     with col_size:
-        size_choice = st.selectbox("BUBBLE SIZE", ["Market Cap", "Relative Volume (RVOL)", "Dividend Yield (%)"], index=0)
+        size_label = st.selectbox("BUBBLE SIZE", size_opts, index=0)
+        size_col = METRIC_REGISTRY[size_label]
 
     matrix_tickers = SECTOR_DATASETS[scatter_sector]
     matrix_data = fetch_ticker_data(matrix_tickers)
@@ -807,7 +1000,6 @@ with tab_scatter:
                 "14D RSI": round(d["rsi"], 1) if d["rsi"] is not None else None,
                 "50D SMA Spread (%)": round(d["sma_50_dist"], 2) if d["sma_50_dist"] is not None else None,
                 "RVOL (Volume Multiplier)": round(d["rvol"], 2) if d["rvol"] is not None else 1.0,
-                "Relative Volume (RVOL)": round(d["rvol"], 2) if d["rvol"] is not None else 1.0,
                 "RS vs SPY Alpha (%)": round(d["gain_30"] - spy_gain_30, 2),
                 "Trailing P/E": round(d["pe_ratio"], 1) if d["pe_ratio"] else None,
                 "Forward P/E": round(d["fwd_pe"], 1) if d["fwd_pe"] else None,
@@ -822,15 +1014,14 @@ with tab_scatter:
     if plot_rows:
         df_plot = pd.DataFrame(plot_rows)
 
-        # Dynamic palette
-        if color_choice in ["Daily Gain (%)", "50D SMA Spread (%)"]:
-            color_scale = ["#B91C1C", "#64748B", "#15803D"]
+        if color_col in ["Daily Gain (%)", "50D SMA Spread (%)"]:
+            color_scale = [thm["spark_neg"], "#64748B", thm["spark_pos"]]
             c_mid = 0.0
-        elif color_choice == "14D RSI":
-            color_scale = ["#3B82F6", "#15803D", "#F59E0B", "#B91C1C"]
+        elif color_col == "14D RSI":
+            color_scale = ["#3B82F6", thm["spark_pos"], "#F59E0B", thm["spark_neg"]]
             c_mid = 50.0
-        elif "P/E" in color_choice or "PEG" in color_choice:
-            color_scale = ["#15803D", "#F59E0B", "#B91C1C"]
+        elif "P/E" in color_col or "PEG" in color_col:
+            color_scale = [thm["spark_pos"], "#F59E0B", thm["spark_neg"]]
             c_mid = None
         else:
             color_scale = ["#1E293B", "#3B82F6", "#EF4444"]
@@ -838,12 +1029,12 @@ with tab_scatter:
 
         fig = px.scatter(
             df_plot,
-            x=x_choice,
-            y=y_choice,
+            x=x_col,
+            y=y_col,
             text="Ticker",
-            size=size_choice,
+            size=size_col,
             size_max=30,
-            color=color_choice,
+            color=color_col,
             color_continuous_scale=color_scale,
             color_continuous_midpoint=c_mid,
             hover_name="Name",
@@ -860,37 +1051,38 @@ with tab_scatter:
                 "PEG Ratio": True,
                 "Beta (Risk)": True,
                 "Cap Label": True,
-                size_choice: False
+                size_col: False
             }
         )
 
-        # Dynamic crosshairs based on chosen axis
-        ref_x = 50.0 if x_choice == "14D RSI" else 0.0
-        ref_y = 50.0 if y_choice == "14D RSI" else (1.0 if "RVOL" in y_choice else 0.0)
-        fig.add_hline(y=ref_y, line_dash="dash", line_color="#475569", line_width=1.2)
-        fig.add_vline(x=ref_x, line_dash="dash", line_color="#475569", line_width=1.2)
+        ref_x = 50.0 if x_col == "14D RSI" else 0.0
+        ref_y = 50.0 if y_col == "14D RSI" else (1.0 if "RVOL" in y_col else 0.0)
+        fig.add_hline(y=ref_y, line_dash="dash", line_color=thm["plotly_line"], line_width=1.2)
+        fig.add_vline(x=ref_x, line_dash="dash", line_color=thm["plotly_line"], line_width=1.2)
 
         fig.update_traces(
             textposition="top center",
-            textfont=dict(family="Inter, Segoe UI, sans-serif", size=11, color="#0F172A"),
-            marker=dict(line=dict(width=1.2, color="#0F172A"), opacity=0.9)
+            textfont=dict(family="Inter, Segoe UI, sans-serif", size=11, color=thm["text_color"]),
+            marker=dict(line=dict(width=1.2, color=thm["card_border"]), opacity=0.9)
         )
 
         fig.update_layout(
             height=600,
             margin=dict(l=40, r=40, t=30, b=40),
-            plot_bgcolor="#F8FAFC",
-            paper_bgcolor="#FFFFFF",
-            font=dict(family="Inter, Segoe UI, sans-serif", size=11, color="#0F172A"),
+            plot_bgcolor=thm["plotly_plot_bg"],
+            paper_bgcolor=thm["plotly_paper_bg"],
+            font=dict(family="Inter, Segoe UI, sans-serif", size=11, color=thm["text_color"]),
             xaxis=dict(
-                title=dict(text=f"<b>{x_choice.upper()}</b>", font=dict(size=12)),
-                gridcolor="#E2E8F0",
-                zeroline=False
+                title=dict(text=f"<b>{x_col.upper()}</b>", font=dict(size=12, color=thm["text_color"])),
+                gridcolor=thm["plotly_grid"],
+                zeroline=False,
+                tickfont=dict(color=thm["text_color"])
             ),
             yaxis=dict(
-                title=dict(text=f"<b>{y_choice.upper()}</b>", font=dict(size=12)),
-                gridcolor="#E2E8F0",
-                zeroline=False
+                title=dict(text=f"<b>{y_col.upper()}</b>", font=dict(size=12, color=thm["text_color"])),
+                gridcolor=thm["plotly_grid"],
+                zeroline=False,
+                tickfont=dict(color=thm["text_color"])
             )
         )
 
@@ -929,7 +1121,7 @@ with tab_commodities:
 
     comm_html = '<div style="overflow-x: auto; margin-top: 10px;">'
     comm_html += '<div class="section-banner">COMMODITIES & DERIVATIVE FUTURES (ENERGY, METALS, AG & LEVERAGED BENCHMARKS)</div>'
-    comm_html += '<table class="sheet-table"><thead><tr><th>GROUP</th><th>UNDERLYING BENCHMARK</th><th>TICKER</th><th>FUND NAME</th><th>EXPOSURE</th><th>PRICE</th><th>TODAY ($)</th><th>TODAY (%)</th><th>DAY RANGE</th><th>9 EMA</th><th>21 EMA</th><th>30D (%)</th><th>VOLUME</th><th>EXPENSE</th><th>SIGNAL</th><th style="text-align:center;">30D TREND</th></tr></thead><tbody>'
+    comm_html += f'<table class="sheet-table"><thead><tr><th>GROUP</th><th>UNDERLYING BENCHMARK</th><th>TICKER</th><th>FUND NAME</th><th>EXPOSURE</th><th>PRICE</th><th>TODAY ($)</th><th>TODAY (%)</th><th>DAY RANGE</th><th>9 EMA</th><th>21 EMA</th><th>30D (%)</th><th>VOLUME</th><th>EXPENSE</th><th>SIGNAL</th><th style="text-align:center;">30D TREND</th></tr></thead><tbody>'
     
     for c in COMMODITIES_REGISTRY:
         t = c["ticker"]
@@ -949,7 +1141,7 @@ with tab_commodities:
     render_html(comm_html)
 
 # ---------------------------------------------------------
-# TAB 5: TERMINAL GLOSSARY & REFERENCE GUIDE
+# TAB 5: TERMINAL GLOSSARY & REFERENCE GUIDE (ZERO EMOJIS)
 # ---------------------------------------------------------
 with tab_glossary:
     st.markdown("<div class='section-banner'>TERMINAL GLOSSARY // INSTITUTIONAL VALUATION & METRIC REFERENCE</div>", unsafe_allow_html=True)
@@ -957,36 +1149,28 @@ with tab_glossary:
     g_col1, g_col2 = st.columns(2)
     
     with g_col1:
-        st.markdown("""
-        ### 📊 VALUATION & MULTIPLES
+        st.markdown(f"""
+        ### VALUATION & MULTIPLES
         * **Trailing P/E (Price-to-Earnings):** Current share price divided by actual net income per share over the trailing 12 months (TTM). Backward-looking, but audited.
         * **Forward P/E:** Current share price divided by Wall Street consensus EPS estimates over the upcoming 12 months. Highlights whether earnings are expected to expand (compressing the multiple) or contract.
-        * **PEG Ratio (Price/Earnings-to-Growth):** $\\text{P/E Ratio} \\div \\text{Annual Expected EPS Growth Rate}$. A PEG under **1.0** traditionally indicates a company is undervalued relative to its growth trajectory.
-        * **Market Capitalization (Cap):** Total equity value of a firm ($\\text{Shares Outstanding} \\times \\text{Share Price}$). Categorized as Mega-Cap ($200B+), Large-Cap ($10B–$200B), Mid-Cap ($2B–$10B), and Small-Cap (<$2B).
+        * **PEG Ratio (Price/Earnings-to-Growth):** $\\text{{P/E Ratio}} \\div \\text{{Annual Expected EPS Growth Rate}}$. A PEG under **1.0** traditionally indicates a company is undervalued relative to its growth trajectory.
+        * **Market Capitalization (Cap):** Total equity value of a firm ($\\text{{Shares Outstanding}} \\times \\text{{Share Price}}$). Categorized as Mega-Cap ($200B+), Large-Cap ($10B–$200B), Mid-Cap ($2B–$10B), and Small-Cap (<$2B).
 
         ---
 
-        ### 💰 EARNINGS & ACCOUNTING STANDARDS
-        * **EPS (Earnings Per Share):** The net portion of a company's profit allocated to each share of common stock ($\\text{Net Income} \\div \\text{Shares Outstanding}$).
+        ### EARNINGS & ACCOUNTING STANDARDS
+        * **EPS (Earnings Per Share):** The net portion of a company's profit allocated to each share of common stock ($\\text{{Net Income}} \\div \\text{{Shares Outstanding}}$).
         * **GAAP Net Income:** Earnings calculated under strict, standardized Generally Accepted Accounting Principles. Mandatory for official SEC 10-K/10-Q filings.
         * **Non-GAAP ("Adjusted") Earnings:** Operational metrics reported by management that remove non-cash expenses (e.g., stock-based compensation, goodwill impairments) to portray core recurring profitability. Tech and SaaS firms frequently look profitable on Non-GAAP while technically losing money on a GAAP basis.
         """)
         
     with g_col2:
-        st.markdown("""
-        ### ⚡ ADVANCED TECHNICAL INDICATORS & SIGNALS
+        st.markdown(f"""
+        ### ADVANCED TECHNICAL INDICATORS & SIGNALS
         * **14D RSI (Relative Strength Index):** Velocity oscillator measured from 0 to 100. Readings above **70** indicate overbought/extended conditions; readings below **30** indicate oversold washouts. Healthy growth stocks typically hold support between **45 and 55** during pullbacks.
         * **50D Spread (% Distance from 50 SMA):** Quantitative extension relative to the institutional 50-day moving average. Positive values confirm an ongoing uptrend; values exceeding **+12% to +15%** flag severe overextension where institutional buying typically pauses.
         * **RVOL (Relative Volume):** Ratio of today's volume to the 20-day historical average. An RVOL above **1.50x** confirms heavy institutional participation and authentic breakouts/rotations, while an RVOL below **0.70x** signals low-conviction chop.
-        * **RS vs. SPY (30D Alpha):** Net 30-day percentage outperformance against the S&P 500 ($\\text{Stock 30D \\%} - \\text{SPY 30D \\%}$). Positive values highlight the true leaders attracting rotated institutional capital.
+        * **RS vs. SPY (30D Alpha):** Net 30-day percentage outperformance against the S&P 500 ($\\text{{Stock 30D \\%}} - \\text{{SPY 30D \\%}}$). Positive values highlight the true leaders attracting rotated institutional capital.
         * **9 & 21 EMA Signal:** Short-term trend confirmation. Marked **BULL** when the fast 9 EMA holds above the 21 EMA, and **BEAR** when short-term momentum breaks down.
         * **Beta ($\\beta$):** Systematic market sensitivity (S&P 500 = 1.0). A Beta of 1.8 indicates the asset moves with nearly 80% higher amplitude than the broader index.
         """)
-
-# ---------------------------------------------------------
-# SIDEBAR CONTROLS
-# ---------------------------------------------------------
-st.sidebar.markdown("### SYSTEM CONTROLS")
-if st.sidebar.button("FORCE REFRESH DATA"):
-    st.cache_data.clear()
-    st.rerun()
