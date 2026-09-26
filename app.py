@@ -169,7 +169,7 @@ css_styling = """
 render_html(css_styling)
 
 # ---------------------------------------------------------
-# CACHED DATA FETCHER (EXPANDED FUNDAMENTALS)
+# CACHED DATA FETCHER (FUNDAMENTALS + ADVANCED TECHNICALS)
 # ---------------------------------------------------------
 @st.cache_data(ttl=300)
 def fetch_ticker_data(tickers):
@@ -178,8 +178,9 @@ def fetch_ticker_data(tickers):
         try:
             ticker = t.strip().upper()
             stock = yf.Ticker(ticker)
-            df = stock.history(period="3mo")
-            if df.empty or len(df) < 5:
+            # Pull 6mo data to ensure adequate bars for 50 SMA and 14 RSI calculations
+            df = stock.history(period="6mo")
+            if df.empty or len(df) < 22:
                 continue
             
             close = df["Close"].dropna()
@@ -187,12 +188,39 @@ def fetch_ticker_data(tickers):
             low = df["Low"].dropna()
             volume = df["Volume"].dropna()
 
+            # 1. EMAs
             ema_9 = close.ewm(span=9, adjust=False).mean()
             ema_21 = close.ewm(span=21, adjust=False).mean()
 
+            # 2. 30-Day Momentum
             hist_30 = close.iloc[-22:] if len(close) >= 22 else close
             gain_30 = ((close.iloc[-1] - hist_30.iloc[0]) / hist_30.iloc[0]) * 100
 
+            # 3. 14-Day RSI (Wilder's Smoothing)
+            delta = close.diff()
+            gain = delta.clip(lower=0)
+            loss = -delta.clip(upper=0)
+            avg_gain = gain.ewm(alpha=1/14, min_periods=14, adjust=False).mean()
+            avg_loss = loss.ewm(alpha=1/14, min_periods=14, adjust=False).mean()
+            rs = avg_gain / avg_loss.replace(0, np.nan)
+            rsi_series = 100.0 - (100.0 / (1.0 + rs))
+            rsi_14 = float(rsi_series.iloc[-1]) if not pd.isna(rsi_series.iloc[-1]) else None
+
+            # 4. 50-Day SMA Extension
+            if len(close) >= 50:
+                sma_50_val = close.rolling(50).mean().iloc[-1]
+                sma_50_dist = float(((close.iloc[-1] - sma_50_val) / sma_50_val) * 100) if sma_50_val > 0 else None
+            else:
+                sma_50_dist = None
+
+            # 5. RVOL (Relative Volume vs. 20-Day Average)
+            if len(volume) >= 21:
+                vol_prior_20 = volume.iloc[-21:-1].mean()
+                rvol = float(volume.iloc[-1] / vol_prior_20) if vol_prior_20 > 0 else 1.0
+            else:
+                rvol = 1.0
+
+            # Fundamentals
             info = stock.info or {}
             market_cap = info.get("marketCap", None)
             pe_ratio = info.get("trailingPE", None)
@@ -214,6 +242,9 @@ def fetch_ticker_data(tickers):
                 "gain_30": float(gain_30),
                 "ema_9": float(ema_9.iloc[-1]),
                 "ema_21": float(ema_21.iloc[-1]),
+                "rsi": rsi_14,
+                "sma_50_dist": sma_50_dist,
+                "rvol": rvol,
                 "day_low": float(low.iloc[-1]),
                 "day_high": float(high.iloc[-1]),
                 "vol": int(volume.iloc[-1]),
@@ -278,6 +309,7 @@ BENCHMARKS_EXTRA = [
 
 ALL_BENCH_TICKERS = list(SECTOR_MAP.keys()) + [b[0] for b in BENCHMARKS_EXTRA]
 bench_data = fetch_ticker_data(ALL_BENCH_TICKERS)
+spy_gain_30 = bench_data.get("SPY", {}).get("gain_30", 0.0)
 
 # ---------------------------------------------------------
 # 1. TOP INTERACTIVE BENCHMARK RIBBON
@@ -611,19 +643,23 @@ SECTOR_DATASETS = {
 }
 
 # ---------------------------------------------------------
-# TAB 2: SECTOR EXPLORER (WITH FUNDAMENTAL TOGGLE)
+# TAB 2: SECTOR EXPLORER (WITH CATEGORIZED TOGGLES)
 # ---------------------------------------------------------
 with tab_sector:
-    col_sel, col_tgl = st.columns([1, 2])
+    col_sel, col_tgl_f, col_tgl_t = st.columns([1.5, 1, 1.2])
     with col_sel:
         sector_list = list(SECTOR_DATASETS.keys())
         default_idx = sector_list.index(st.session_state.selected_sector) if st.session_state.selected_sector in sector_list else 0
         selected_sector = st.selectbox("SELECT SECTOR BENCHMARK", sector_list, index=default_idx)
         st.session_state.selected_sector = selected_sector
         
-    with col_tgl:
+    with col_tgl_f:
         st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
-        show_fundamentals = st.toggle("Show Advanced Fundamentals (Fwd P/E, PEG, Beta, Div Yield)", value=False)
+        show_fundamentals = st.toggle("Fundamentals (P/E, Fwd P/E, PEG, Beta, Div %)", value=False)
+        
+    with col_tgl_t:
+        st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
+        show_technicals = st.toggle("Advanced Technicals (14D RSI, 50D Spread, RVOL, RS vs SPY)", value=False)
 
     sector_tickers = SECTOR_DATASETS[selected_sector]
     sec_data = fetch_ticker_data(sector_tickers)
@@ -632,6 +668,7 @@ with tab_sector:
     for t in sector_tickers:
         if t in sec_data:
             d = sec_data[t]
+            rs_spy = round(d["gain_30"] - spy_gain_30, 2)
             rows.append({
                 "ticker": t,
                 "name": d["name"],
@@ -647,6 +684,10 @@ with tab_sector:
                 "peg": f"{d['peg_ratio']:.2f}" if d["peg_ratio"] else "--",
                 "beta": f"{d['beta']:.2f}" if d["beta"] else "--",
                 "div": f"{d['div_yield']:.2f}%" if d["div_yield"] else "--",
+                "rsi": d["rsi"],
+                "sma_50_dist": d["sma_50_dist"],
+                "rvol": d["rvol"],
+                "rs_spy": rs_spy,
                 "bullish": d["bullish"],
                 "sparkline": d["sparkline"]
             })
@@ -654,15 +695,49 @@ with tab_sector:
     if rows:
         col_l, col_r = st.columns(2)
 
+        def build_extra_th():
+            html = ""
+            if show_fundamentals:
+                html += '<th>FWD P/E</th><th>PEG</th><th>BETA</th><th>DIV %</th>'
+            if show_technicals:
+                html += '<th>14D RSI</th><th>50D SPREAD</th><th>RVOL</th><th>RS vs SPY</th>'
+            return html
+
+        def build_extra_td(r):
+            html = ""
+            if show_fundamentals:
+                html += f'<td>{r["fwd_pe"]}</td><td>{r["peg"]}</td><td>{r["beta"]}</td><td>{r["div"]}</td>'
+            if show_technicals:
+                # RSI Cell
+                rsi_val = f'{r["rsi"]:.1f}' if r["rsi"] is not None else '--'
+                c_rsi = 'neg-cell' if (r["rsi"] and r["rsi"] >= 70) else ('pos-cell' if (r["rsi"] and r["rsi"] <= 30) else '')
+                
+                # 50D Spread Cell
+                if r["sma_50_dist"] is not None:
+                    c_50 = "pos-cell" if r["sma_50_dist"] >= 0 else "neg-cell"
+                    s_50 = "+" if r["sma_50_dist"] >= 0 else ""
+                    v_50 = f'{s_50}{r["sma_50_dist"]:.1f}%'
+                else:
+                    c_50, v_50 = "", "--"
+                    
+                # RVOL Cell
+                rvol_val = f'{r["rvol"]:.2f}x' if r["rvol"] is not None else '--'
+                c_rvol = 'pos-cell' if (r["rvol"] and r["rvol"] >= 1.5) else ''
+                
+                # RS vs SPY Cell
+                c_rs = "pos-cell" if r["rs_spy"] >= 0 else "neg-cell"
+                s_rs = "+" if r["rs_spy"] >= 0 else ""
+                v_rs = f'{s_rs}{r["rs_spy"]:.1f}%'
+
+                html += f'<td class="{c_rsi}">{rsi_val}</td><td class="{c_50}">{v_50}</td><td class="{c_rvol}">{rvol_val}</td><td class="{c_rs}">{v_rs}</td>'
+            return html
+
         # 1. TOP MARKET CAP LEADERS
         with col_l:
             sorted_mcap = sorted(rows, key=lambda x: (x["mcap"] or 0), reverse=True)[:20]
             tbl_html = '<div style="overflow-x: auto; margin-bottom: 20px;">'
             tbl_html += f'<div class="section-banner">MARKET CAP CONSTITUENTS [TOP {len(sorted_mcap)}]</div>'
-            tbl_html += '<table class="sheet-table"><thead><tr><th>TICKER</th><th>ASSET NAME</th><th>PRICE</th><th>TODAY ($)</th><th>TODAY (%)</th><th>30D (%)</th><th>CAP</th><th>P/E</th>'
-            if show_fundamentals:
-                tbl_html += '<th>FWD P/E</th><th>PEG</th><th>BETA</th><th>DIV %</th>'
-            tbl_html += '<th>SIGNAL</th><th style="text-align:center;">30D TREND</th></tr></thead><tbody>'
+            tbl_html += f'<table class="sheet-table"><thead><tr><th>TICKER</th><th>ASSET NAME</th><th>PRICE</th><th>TODAY ($)</th><th>TODAY (%)</th><th>30D (%)</th><th>CAP</th><th>P/E</th>{build_extra_th()}<th>SIGNAL</th><th style="text-align:center;">30D TREND</th></tr></thead><tbody>'
             
             for r in sorted_mcap:
                 c_dlr = "pos-cell" if r["chg_dlr"] >= 0 else "neg-cell"
@@ -674,10 +749,7 @@ with tab_sector:
                 cue = '<span class="bullish-badge">BULL</span>' if r["bullish"] else '<span class="bearish-badge">BEAR</span>'
                 spark = make_svg_sparkline(r["sparkline"], is_positive=(r["gain_30"] >= 0))
 
-                tbl_html += f'<tr><td style="font-weight:700;">{r["ticker"]}</td><td style="max-width:110px; overflow:hidden; text-overflow:ellipsis;">{r["name"]}</td><td>${r["price"]:.2f}</td><td class="{c_dlr}">{s_dlr}${r["chg_dlr"]:.2f}</td><td class="{c_pct}">{s_pct}{r["chg_pct"]:.2f}%</td><td class="{c_30}">{s_30}{r["gain_30"]:.2f}%</td><td>{r["mcap_fmt"]}</td><td>{r["pe"]}</td>'
-                if show_fundamentals:
-                    tbl_html += f'<td>{r["fwd_pe"]}</td><td>{r["peg"]}</td><td>{r["beta"]}</td><td>{r["div"]}</td>'
-                tbl_html += f'<td style="text-align:center;">{cue}</td><td style="text-align:center;">{spark}</td></tr>'
+                tbl_html += f'<tr><td style="font-weight:700;">{r["ticker"]}</td><td style="max-width:110px; overflow:hidden; text-overflow:ellipsis;">{r["name"]}</td><td>${r["price"]:.2f}</td><td class="{c_dlr}">{s_dlr}${r["chg_dlr"]:.2f}</td><td class="{c_pct}">{s_pct}{r["chg_pct"]:.2f}%</td><td class="{c_30}">{s_30}{r["gain_30"]:.2f}%</td><td>{r["mcap_fmt"]}</td><td>{r["pe"]}</td>{build_extra_td(r)}<td style="text-align:center;">{cue}</td><td style="text-align:center;">{spark}</td></tr>'
             tbl_html += '</tbody></table></div>'
             render_html(tbl_html)
 
@@ -686,10 +758,7 @@ with tab_sector:
             sorted_mom = sorted(rows, key=lambda x: x["gain_30"], reverse=True)[:10]
             tbl_html2 = '<div style="overflow-x: auto; margin-bottom: 20px;">'
             tbl_html2 += '<div class="section-banner">RELATIVE STRENGTH // TOP 10 (30-DAY GAINERS)</div>'
-            tbl_html2 += '<table class="sheet-table"><thead><tr><th>TICKER</th><th>ASSET NAME</th><th>PRICE</th><th>30D (%)</th><th>TODAY (%)</th><th>CAP</th><th>P/E</th>'
-            if show_fundamentals:
-                tbl_html2 += '<th>FWD P/E</th><th>PEG</th><th>BETA</th><th>DIV %</th>'
-            tbl_html2 += '<th>SIGNAL</th><th style="text-align:center;">30D TREND</th></tr></thead><tbody>'
+            tbl_html2 += f'<table class="sheet-table"><thead><tr><th>TICKER</th><th>ASSET NAME</th><th>PRICE</th><th>30D (%)</th><th>TODAY (%)</th><th>CAP</th><th>P/E</th>{build_extra_th()}<th>SIGNAL</th><th style="text-align:center;">30D TREND</th></tr></thead><tbody>'
             
             for r in sorted_mom:
                 c_pct = "pos-cell" if r["chg_pct"] >= 0 else "neg-cell"
@@ -699,26 +768,29 @@ with tab_sector:
                 cue = '<span class="bullish-badge">BULL</span>' if r["bullish"] else '<span class="bearish-badge">BEAR</span>'
                 spark = make_svg_sparkline(r["sparkline"], is_positive=(r["gain_30"] >= 0))
 
-                tbl_html2 += f'<tr><td style="font-weight:700;">{r["ticker"]}</td><td style="max-width:120px; overflow:hidden; text-overflow:ellipsis;">{r["name"]}</td><td>${r["price"]:.2f}</td><td class="{c_30}">{s_30}{r["gain_30"]:.2f}%</td><td class="{c_pct}">{s_pct}{r["chg_pct"]:.2f}%</td><td>{r["mcap_fmt"]}</td><td>{r["pe"]}</td>'
-                if show_fundamentals:
-                    tbl_html2 += f'<td>{r["fwd_pe"]}</td><td>{r["peg"]}</td><td>{r["beta"]}</td><td>{r["div"]}</td>'
-                tbl_html2 += f'<td style="text-align:center;">{cue}</td><td style="text-align:center;">{spark}</td></tr>'
+                tbl_html2 += f'<tr><td style="font-weight:700;">{r["ticker"]}</td><td style="max-width:120px; overflow:hidden; text-overflow:ellipsis;">{r["name"]}</td><td>${r["price"]:.2f}</td><td class="{c_30}">{s_30}{r["gain_30"]:.2f}%</td><td class="{c_pct}">{s_pct}{r["chg_pct"]:.2f}%</td><td>{r["mcap_fmt"]}</td><td>{r["pe"]}</td>{build_extra_td(r)}<td style="text-align:center;">{cue}</td><td style="text-align:center;">{spark}</td></tr>'
             tbl_html2 += '</tbody></table></div>'
             render_html(tbl_html2)
 
 # ---------------------------------------------------------
-# TAB 3: MOMENTUM & FUNDAMENTAL SCATTER MATRIX
+# TAB 3: MOMENTUM SCATTER MATRIX (CONFIGURABLE AXES)
 # ---------------------------------------------------------
 with tab_scatter:
-    st.markdown("<div class='section-banner'>RELATIVE STRENGTH & VALUATION MATRIX</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-banner'>RELATIVE STRENGTH MATRIX // MULTI-DIMENSIONAL ANALYSIS</div>", unsafe_allow_html=True)
     
-    col_sc1, col_color, col_size = st.columns([1.5, 1, 1])
+    col_sc1, col_x, col_y = st.columns([1.2, 1, 1])
+    col_color, col_size, _ = st.columns([1.2, 1, 1])
+    
     with col_sc1:
         scatter_sector = st.selectbox("SELECT SECTOR FOR MATRIX", list(SECTOR_DATASETS.keys()), index=list(SECTOR_DATASETS.keys()).index(st.session_state.selected_sector))
+    with col_x:
+        x_choice = st.selectbox("X-AXIS (MOMENTUM)", ["30D Gain (%)", "RS vs SPY Alpha (%)", "50D SMA Spread (%)", "14D RSI"], index=0)
+    with col_y:
+        y_choice = st.selectbox("Y-AXIS (VELOCITY)", ["Daily Gain (%)", "14D RSI", "50D SMA Spread (%)", "RVOL (Volume Multiplier)"], index=0)
     with col_color:
-        color_choice = st.selectbox("COLOR DIMENSION", ["Daily Gain (%)", "Forward P/E", "Trailing P/E", "PEG Ratio", "Beta (Risk)"], index=0)
+        color_choice = st.selectbox("COLOR DIMENSION", ["Daily Gain (%)", "14D RSI", "50D SMA Spread (%)", "Relative Volume (RVOL)", "Forward P/E", "Trailing P/E", "PEG Ratio", "Beta (Risk)"], index=0)
     with col_size:
-        size_choice = st.selectbox("BUBBLE SIZE", ["Market Cap", "Dividend Yield (%)"], index=0)
+        size_choice = st.selectbox("BUBBLE SIZE", ["Market Cap", "Relative Volume (RVOL)", "Dividend Yield (%)"], index=0)
 
     matrix_tickers = SECTOR_DATASETS[scatter_sector]
     matrix_data = fetch_ticker_data(matrix_tickers)
@@ -732,6 +804,11 @@ with tab_scatter:
                 "Name": d["name"],
                 "30D Gain (%)": round(d["gain_30"], 2),
                 "Daily Gain (%)": round(d["change_pct"], 2),
+                "14D RSI": round(d["rsi"], 1) if d["rsi"] is not None else None,
+                "50D SMA Spread (%)": round(d["sma_50_dist"], 2) if d["sma_50_dist"] is not None else None,
+                "RVOL (Volume Multiplier)": round(d["rvol"], 2) if d["rvol"] is not None else 1.0,
+                "Relative Volume (RVOL)": round(d["rvol"], 2) if d["rvol"] is not None else 1.0,
+                "RS vs SPY Alpha (%)": round(d["gain_30"] - spy_gain_30, 2),
                 "Trailing P/E": round(d["pe_ratio"], 1) if d["pe_ratio"] else None,
                 "Forward P/E": round(d["fwd_pe"], 1) if d["fwd_pe"] else None,
                 "PEG Ratio": round(d["peg_ratio"], 2) if d["peg_ratio"] else None,
@@ -745,12 +822,15 @@ with tab_scatter:
     if plot_rows:
         df_plot = pd.DataFrame(plot_rows)
 
-        # Dynamic color scaling based on chosen dimension
-        if color_choice == "Daily Gain (%)":
+        # Dynamic palette
+        if color_choice in ["Daily Gain (%)", "50D SMA Spread (%)"]:
             color_scale = ["#B91C1C", "#64748B", "#15803D"]
             c_mid = 0.0
+        elif color_choice == "14D RSI":
+            color_scale = ["#3B82F6", "#15803D", "#F59E0B", "#B91C1C"]
+            c_mid = 50.0
         elif "P/E" in color_choice or "PEG" in color_choice:
-            color_scale = ["#15803D", "#F59E0B", "#B91C1C"]  # Lower multiples green, high red
+            color_scale = ["#15803D", "#F59E0B", "#B91C1C"]
             c_mid = None
         else:
             color_scale = ["#1E293B", "#3B82F6", "#EF4444"]
@@ -758,8 +838,8 @@ with tab_scatter:
 
         fig = px.scatter(
             df_plot,
-            x="30D Gain (%)",
-            y="Daily Gain (%)",
+            x=x_choice,
+            y=y_choice,
             text="Ticker",
             size=size_choice,
             size_max=30,
@@ -772,6 +852,9 @@ with tab_scatter:
                 "Price": True,
                 "30D Gain (%)": ":.2f",
                 "Daily Gain (%)": ":.2f",
+                "14D RSI": True,
+                "50D SMA Spread (%)": True,
+                "RS vs SPY Alpha (%)": True,
                 "Trailing P/E": True,
                 "Forward P/E": True,
                 "PEG Ratio": True,
@@ -781,8 +864,11 @@ with tab_scatter:
             }
         )
 
-        fig.add_hline(y=0, line_dash="dash", line_color="#475569", line_width=1.2)
-        fig.add_vline(x=0, line_dash="dash", line_color="#475569", line_width=1.2)
+        # Dynamic crosshairs based on chosen axis
+        ref_x = 50.0 if x_choice == "14D RSI" else 0.0
+        ref_y = 50.0 if y_choice == "14D RSI" else (1.0 if "RVOL" in y_choice else 0.0)
+        fig.add_hline(y=ref_y, line_dash="dash", line_color="#475569", line_width=1.2)
+        fig.add_vline(x=ref_x, line_dash="dash", line_color="#475569", line_width=1.2)
 
         fig.update_traces(
             textposition="top center",
@@ -797,12 +883,12 @@ with tab_scatter:
             paper_bgcolor="#FFFFFF",
             font=dict(family="Inter, Segoe UI, sans-serif", size=11, color="#0F172A"),
             xaxis=dict(
-                title=dict(text="<b>30-DAY RELATIVE MOMENTUM (%)</b>", font=dict(size=12)),
+                title=dict(text=f"<b>{x_choice.upper()}</b>", font=dict(size=12)),
                 gridcolor="#E2E8F0",
                 zeroline=False
             ),
             yaxis=dict(
-                title=dict(text="<b>TODAY'S INTRADAY VELOCITY (%)</b>", font=dict(size=12)),
+                title=dict(text=f"<b>{y_choice.upper()}</b>", font=dict(size=12)),
                 gridcolor="#E2E8F0",
                 zeroline=False
             )
@@ -875,7 +961,7 @@ with tab_glossary:
         ### 📊 VALUATION & MULTIPLES
         * **Trailing P/E (Price-to-Earnings):** Current share price divided by actual net income per share over the trailing 12 months (TTM). Backward-looking, but audited.
         * **Forward P/E:** Current share price divided by Wall Street consensus EPS estimates over the upcoming 12 months. Highlights whether earnings are expected to expand (compressing the multiple) or contract.
-        * **PEG Ratio (Price/Earnings-to-Growth):** $\\text{P/E Ratio} \\div \\text{Annual Expected EPS Growth Rate}$. A standard P/E can be misleading; a PEG under **1.0** traditionally indicates a company is undervalued relative to its growth trajectory.
+        * **PEG Ratio (Price/Earnings-to-Growth):** $\\text{P/E Ratio} \\div \\text{Annual Expected EPS Growth Rate}$. A PEG under **1.0** traditionally indicates a company is undervalued relative to its growth trajectory.
         * **Market Capitalization (Cap):** Total equity value of a firm ($\\text{Shares Outstanding} \\times \\text{Share Price}$). Categorized as Mega-Cap ($200B+), Large-Cap ($10B–$200B), Mid-Cap ($2B–$10B), and Small-Cap (<$2B).
 
         ---
@@ -888,11 +974,13 @@ with tab_glossary:
         
     with g_col2:
         st.markdown("""
-        ### ⚡ MOMENTUM, TECHNICALS & RISK
-        * **9 & 21 EMA (Exponential Moving Averages):** Moving averages weighted heavily toward recent price prints. When the **9 EMA crosses above the 21 EMA**, the terminal marks the asset as **BULL** (positive short-term velocity); a cross below signals **BEAR** (consolidation or downtrend).
-        * **30D Relative Momentum:** Net percentage price change over the last 22 trading sessions (~30 calendar days). Used by sector rotators to identify emerging institutional inflows.
-        * **Beta ($\\beta$):** Systematic risk/volatility benchmarked against the broader market (S&P 500 = 1.0). A Beta of **1.8** means the asset historically swings nearly twice as violently as the index in either direction; a Beta of **0.5** indicates defensive, low-volatility behavior.
-        * **Dividend Yield (%):** Annual cash payout per share divided by the current share price. A vital return component in capital-intensive, mature sectors (Staples, Utilities, Energy, Financials).
+        ### ⚡ ADVANCED TECHNICAL INDICATORS & SIGNALS
+        * **14D RSI (Relative Strength Index):** Velocity oscillator measured from 0 to 100. Readings above **70** indicate overbought/extended conditions; readings below **30** indicate oversold washouts. Healthy growth stocks typically hold support between **45 and 55** during pullbacks.
+        * **50D Spread (% Distance from 50 SMA):** Quantitative extension relative to the institutional 50-day moving average. Positive values confirm an ongoing uptrend; values exceeding **+12% to +15%** flag severe overextension where institutional buying typically pauses.
+        * **RVOL (Relative Volume):** Ratio of today's volume to the 20-day historical average. An RVOL above **1.50x** confirms heavy institutional participation and authentic breakouts/rotations, while an RVOL below **0.70x** signals low-conviction chop.
+        * **RS vs. SPY (30D Alpha):** Net 30-day percentage outperformance against the S&P 500 ($\\text{Stock 30D \\%} - \\text{SPY 30D \\%}$). Positive values highlight the true leaders attracting rotated institutional capital.
+        * **9 & 21 EMA Signal:** Short-term trend confirmation. Marked **BULL** when the fast 9 EMA holds above the 21 EMA, and **BEAR** when short-term momentum breaks down.
+        * **Beta ($\\beta$):** Systematic market sensitivity (S&P 500 = 1.0). A Beta of 1.8 indicates the asset moves with nearly 80% higher amplitude than the broader index.
         """)
 
 # ---------------------------------------------------------
