@@ -245,18 +245,72 @@ tab_portfolio, tab_sector, tab_commodities = st.tabs(["💼 PORTFOLIO VIEWER", "
 # ---------------------------------------------------------
 # PORTFOLIO TAB
 # ---------------------------------------------------------
-with tab_portfolio:
-    st.markdown("<div class='section-banner'>PORTFOLIO HOLDINGS & PERFORMANCE</div>", unsafe_allow_html=True)
+@st.cache_data(ttl=60)
+def load_portfolio_holdings():
+    import glob
+    csv_files = glob.glob("Portfolio_Positions*.csv")
+    if not csv_files:
+        return []
     
-    # User holdings configuration (Ticker, Shares, Avg Cost)
-    portfolio_holdings = [
-        {"ticker": "NVDA", "shares": 50, "cost": 115.50},
-        {"ticker": "AAPL", "shares": 30, "cost": 175.00},
-        {"ticker": "MSFT", "shares": 20, "cost": 410.00},
-        {"ticker": "CRDO", "shares": 100, "cost": 32.50},
-        {"ticker": "MRVL", "shares": 40, "cost": 72.00},
-        {"ticker": "AVGO", "shares": 15, "cost": 140.00}
-    ]
+    # Read Fidelity export CSV
+    df = pd.read_csv(csv_files[0])
+    holdings = []
+    
+    for _, row in df.iterrows():
+        symbol = str(row.get("Symbol", "")).strip()
+        # Filter out headers, empty rows, cash sweeps (SPAXX**), pending activities, or disclaimer rows
+        if not symbol or symbol == "nan" or "Pending" in symbol or "**" in symbol:
+            continue
+        
+        try:
+            qty_raw = str(row.get("Quantity", 0)).replace(",", "").strip()
+            qty = float(qty_raw) if qty_raw else 0.0
+            if qty <= 0:
+                continue
+            
+            cost_raw = str(row.get("Average cost basis", "0")).replace("$", "").replace(",", "").strip()
+            cost = float(cost_raw) if cost_raw and cost_raw != "n/a" else 0.0
+            
+            holdings.append({
+                "ticker": symbol.upper(),
+                "shares": qty,
+                "cost": cost
+            })
+        except Exception:
+            continue
+            
+    # Aggregate multiple lots of the same symbol (e.g. VOO Margin & Cash)
+    agg_holdings = {}
+    for h in holdings:
+        t = h["ticker"]
+        if t not in agg_holdings:
+            agg_holdings[t] = {"ticker": t, "shares": h["shares"], "total_cost": h["shares"] * h["cost"]}
+        else:
+            agg_holdings[t]["shares"] += h["shares"]
+            agg_holdings[t]["total_cost"] += h["shares"] * h["cost"]
+            
+    result = []
+    for t, item in agg_holdings.items():
+        avg_c = item["total_cost"] / item["shares"] if item["shares"] > 0 else 0.0
+        result.append({
+            "ticker": t,
+            "shares": round(item["shares"], 4),
+            "cost": avg_c
+        })
+    return result
+
+with tab_portfolio:
+    st.markdown("<div class='section-banner'>PORTFOLIO HOLDINGS & REAL-TIME PERFORMANCE</div>", unsafe_allow_html=True)
+    
+    portfolio_holdings = load_portfolio_holdings()
+    
+    # Fallback if no CSV found
+    if not portfolio_holdings:
+        portfolio_holdings = [
+            {"ticker": "NVDA", "shares": 50, "cost": 115.50},
+            {"ticker": "AAPL", "shares": 30, "cost": 175.00},
+            {"ticker": "MSFT", "shares": 20, "cost": 410.00}
+        ]
     
     port_tickers = [h["ticker"] for h in portfolio_holdings]
     port_data = fetch_ticker_data(port_tickers)
