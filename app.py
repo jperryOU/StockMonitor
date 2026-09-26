@@ -240,7 +240,106 @@ render_html(bench_html)
 # ---------------------------------------------------------
 # TABS SETUP
 # ---------------------------------------------------------
-tab_sector, tab_commodities = st.tabs(["📊 ACTIVE SECTOR EXPLORER", "🛢️ COMMODITY & DERIVATIVE FUTURES"])
+
+tab_portfolio, tab_sector, tab_commodities = st.tabs(["💼 PORTFOLIO VIEWER", "📊 ACTIVE SECTOR EXPLORER", "🛢️ COMMODITY & DERIVATIVE FUTURES"])
+
+# ---------------------------------------------------------
+# PORTFOLIO TAB
+# ---------------------------------------------------------
+with tab_portfolio:
+    st.markdown("<div class='section-banner'>PORTFOLIO HOLDINGS & PERFORMANCE</div>", unsafe_allow_html=True)
+    
+    # User holdings configuration (Ticker, Shares, Avg Cost)
+    portfolio_holdings = [
+        {"ticker": "NVDA", "shares": 50, "cost": 115.50},
+        {"ticker": "AAPL", "shares": 30, "cost": 175.00},
+        {"ticker": "MSFT", "shares": 20, "cost": 410.00},
+        {"ticker": "CRDO", "shares": 100, "cost": 32.50},
+        {"ticker": "MRVL", "shares": 40, "cost": 72.00},
+        {"ticker": "AVGO", "shares": 15, "cost": 140.00}
+    ]
+    
+    port_tickers = [h["ticker"] for h in portfolio_holdings]
+    port_data = fetch_ticker_data(port_tickers)
+    
+    total_market_value = 0.0
+    total_cost_basis = 0.0
+    total_daily_gain_dlr = 0.0
+    
+    port_rows = []
+    for h in portfolio_holdings:
+        t = h["ticker"]
+        shares = h["shares"]
+        cost = h["cost"]
+        cost_basis = shares * cost
+        total_cost_basis += cost_basis
+        
+        if t in port_data:
+            d = port_data[t]
+            price = d["price"]
+            market_value = shares * price
+            total_market_value += market_value
+            
+            # Daily Return
+            daily_change_dlr_per_share = d["change_dlr"]
+            position_daily_gain_dlr = daily_change_dlr_per_share * shares
+            total_daily_gain_dlr += position_daily_gain_dlr
+            daily_change_pct = d["change_pct"]
+            
+            # Overall Gain / Loss
+            overall_gain_dlr = market_value - cost_basis
+            overall_gain_pct = (overall_gain_dlr / cost_basis) * 100 if cost_basis > 0 else 0.0
+            
+            port_rows.append({
+                "ticker": t,
+                "name": d["name"],
+                "shares": shares,
+                "cost": cost,
+                "price": price,
+                "mval": market_value,
+                "daily_dlr": position_daily_gain_dlr,
+                "daily_pct": daily_change_pct,
+                "overall_dlr": overall_gain_dlr,
+                "overall_pct": overall_gain_pct,
+                "bullish": d["bullish"],
+                "sparkline": d["sparkline"]
+            })
+    
+    if port_rows:
+        total_overall_gain_dlr = total_market_value - total_cost_basis
+        total_overall_gain_pct = (total_overall_gain_dlr / total_cost_basis) * 100 if total_cost_basis > 0 else 0.0
+        total_daily_pct = (total_daily_gain_dlr / (total_market_value - total_daily_gain_dlr)) * 100 if (total_market_value - total_daily_gain_dlr) > 0 else 0.0
+        
+        # Summary KPI Metrics Cards
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("Total Portfolio Value", f"${total_market_value:,.2f}")
+        k2.metric("Daily Return", f"${total_daily_gain_dlr:+,.2f}", f"{total_daily_pct:+.2f}%")
+        k3.metric("Total Unrealized Gain", f"${total_overall_gain_dlr:+,.2f}", f"{total_overall_gain_pct:+.2f}%")
+        k4.metric("Total Cost Basis", f"${total_cost_basis:,.2f}")
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # Render Portfolio Table
+        port_html = '<div style="overflow-x: auto; margin-bottom: 20px;">'
+        port_html += '<table class="sheet-table"><thead><tr><th>Ticker</th><th>Company Name</th><th>Shares</th><th>Avg Cost</th><th>Current Price</th><th>Market Value</th><th>Daily Gain ($)</th><th>Daily Gain (%)</th><th>Overall Gain ($)</th><th>Overall Gain (%)</th><th>Momentum</th><th>30-Day Trend</th></tr></thead><tbody>'
+        
+        for r in port_rows:
+            c_daily = "pos-cell" if r["daily_dlr"] >= 0 else "neg-cell"
+            c_overall = "pos-cell" if r["overall_dlr"] >= 0 else "neg-cell"
+            s_daily_dlr = "+" if r["daily_dlr"] >= 0 else ""
+            s_daily_pct = "+" if r["daily_pct"] >= 0 else ""
+            s_overall_dlr = "+" if r["overall_dlr"] >= 0 else ""
+            s_overall_pct = "+" if r["overall_pct"] >= 0 else ""
+            
+            cue = '<span class="bullish-badge">▲ Bullish</span>' if r["bullish"] else '<span class="bearish-badge">▼ Bearish</span>'
+            spark = make_svg_sparkline(r["sparkline"], is_positive=(r["overall_dlr"] >= 0))
+            
+            port_html += f'<tr><td style="font-weight:600;">{r["ticker"]}</td><td>{r["name"]}</td><td>{r["shares"]:,}</td><td>${r["cost"]:.2f}</td><td>${r["price"]:.2f}</td><td>${r["mval"]:,.2f}</td><td class="{c_daily}">{s_daily_dlr}${r["daily_dlr"]:,.2f}</td><td class="{c_daily}">{s_daily_pct}{r["daily_pct']:.2f}%</td><td class="{c_overall}">{s_overall_dlr}${r["overall_dlr"]:,.2f}</td><td class="{c_overall}">{s_overall_pct}{r["overall_pct']:.2f}%</td><td style="text-align:center;">{cue}</td><td>{spark}</td></tr>'
+        
+        port_html += '</tbody></table></div>'
+        render_html(port_html)
+    else:
+        st.info("No portfolio data available.")
 
 SECTOR_DATASETS = {
     "Information Technology": [
