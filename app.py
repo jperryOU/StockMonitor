@@ -10,14 +10,10 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# SESSION STATE & QUERY PARAMETER SORTING
+# SESSION STATE INITIALIZATION
 # ---------------------------------------------------------
 if "selected_sector" not in st.session_state:
     st.session_state.selected_sector = "Information Technology"
-
-params = st.query_params
-port_sort_col = params.get("sort", "mval")
-port_sort_asc = params.get("asc", "false").lower() == "true"
 
 def render_html(html_code):
     clean = "\n".join(line.strip() for line in html_code.splitlines() if line.strip())
@@ -58,15 +54,14 @@ css_styling = """
         white-space: nowrap;
         text-transform: uppercase;
         font-size: 11px;
+        user-select: none;
     }
-    .sheet-table th a {
-        color: #F8FAFC !important;
-        text-decoration: none !important;
-        display: block;
-        width: 100%;
+    .sortable-th {
         cursor: pointer;
+        transition: background-color 0.15s ease;
     }
-    .sheet-table th a:hover {
+    .sortable-th:hover {
+        background-color: #1E293B !important;
         color: #38BDF8 !important;
     }
     .sheet-table td {
@@ -120,20 +115,20 @@ css_styling = """
         font-size: 10px;
         text-transform: uppercase;
     }
-    /* Benchmark button tile formatting (prevents cut-off text) */
+    /* Compact ribbon tiles */
     div[data-testid="column"] button {
         border-radius: 0px !important;
         border: 1px solid #475569 !important;
         background: #F8FAFC !important;
         color: #0F172A !important;
-        padding: 2px 1px !important;
+        padding: 4px 1px !important;
         font-size: 10px !important;
         font-weight: 700 !important;
-        line-height: 1.15 !important;
-        min-height: 48px !important;
+        line-height: 1.25 !important;
+        min-height: 40px !important;
         height: auto !important;
-        white-space: normal !important;
-        word-break: normal !important;
+        white-space: pre-wrap !important;
+        word-break: break-word !important;
     }
     div[data-testid="column"] button:hover {
         background: #E2E8F0 !important;
@@ -252,23 +247,23 @@ def fmt_mcap(val):
 # SECTOR REGISTRY
 # ---------------------------------------------------------
 SECTOR_MAP = {
-    "XLK": ("Information Technology", "XLK • TECH"),
-    "XLV": ("Health Care", "XLV • HLTH"),
-    "XLF": ("Financials", "XLF • FINC"),
-    "XLY": ("Consumer Discretionary", "XLY • COND"),
-    "XLC": ("Communication Services", "XLC • COMM"),
-    "XLI": ("Industrials", "XLI • INDU"),
-    "XLP": ("Consumer Staples", "XLP • CONS"),
-    "XLE": ("Energy", "XLE • ENGY"),
-    "XLU": ("Utilities", "XLU • UTIL"),
-    "XLRE": ("Real Estate", "XLRE • REAL"),
-    "XLB": ("Materials", "XLB • MATR")
+    "XLK": ("Information Technology", "TECH"),
+    "XLV": ("Health Care", "HLTH"),
+    "XLF": ("Financials", "FINC"),
+    "XLY": ("Consumer Discretionary", "COND"),
+    "XLC": ("Communication Services", "COMM"),
+    "XLI": ("Industrials", "INDU"),
+    "XLP": ("Consumer Staples", "CONS"),
+    "XLE": ("Energy", "ENGY"),
+    "XLU": ("Utilities", "UTIL"),
+    "XLRE": ("Real Estate", "REAL"),
+    "XLB": ("Materials", "MATR")
 }
 
 BENCHMARKS_EXTRA = [
-    ("SPY", "SPY • S&P"),
-    ("QQQ", "QQQ • NDX"),
-    ("DIA", "DIA • DJI")
+    ("SPY", "S&P 500"),
+    ("QQQ", "NASDAQ"),
+    ("DIA", "DOW")
 ]
 
 ALL_BENCH_TICKERS = list(SECTOR_MAP.keys()) + [b[0] for b in BENCHMARKS_EXTRA]
@@ -286,15 +281,16 @@ for i, ticker in enumerate(ALL_BENCH_TICKERS):
             sec_name, label = SECTOR_MAP[ticker]
             is_clickable_sector = True
         else:
-            sec_name, label = None, next(b[1] for b in BENCHMARKS_EXTRA if b[0] == ticker)
+            sec_name = None
+            label = next(b[1] for b in BENCHMARKS_EXTRA if b[0] == ticker)
             is_clickable_sector = False
             
         if ticker in bench_data:
             d = bench_data[ticker]
             sign = "+" if d["change_pct"] >= 0 else ""
-            btn_text = f"{label}\n${d['price']:.2f}\n{sign}{d['change_pct']:.2f}%"
+            btn_text = f"{label}\n{ticker} {sign}{d['change_pct']:.2f}%"
         else:
-            btn_text = f"{label}\n--\n--"
+            btn_text = f"{label}\n{ticker} --"
             
         if st.button(btn_text, key=f"bench_btn_{ticker}", use_container_width=True):
             if is_clickable_sector:
@@ -393,7 +389,7 @@ def load_portfolio_holdings():
     return result
 
 # ---------------------------------------------------------
-# TAB 1: PORTFOLIO (WITH CLICKABLE TABLE HEADERS)
+# TAB 1: PORTFOLIO (WITH ZERO-RELOAD CLIENT-SIDE SORTING)
 # ---------------------------------------------------------
 with tab_portfolio:
     st.markdown("<div class='section-banner'>PORTFOLIO AUDIT // REAL-TIME PERFORMANCE</div>", unsafe_allow_html=True)
@@ -462,35 +458,31 @@ with tab_portfolio:
         
         st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
         
-        # Sort data according to current query parameter state
-        sort_k = port_sort_col
-        port_rows = sorted(port_rows, key=lambda x: (x.get(sort_k, 0) or 0), reverse=not port_sort_asc)
+        # Default sort descending by Market Value
+        port_rows = sorted(port_rows, key=lambda x: x["mval"], reverse=True)
         
-        # Helper to generate header link with toggled asc/desc state
-        def make_th(label, col_key):
-            is_active = (port_sort_col == col_key)
-            next_asc = "false" if (is_active and port_sort_asc) else "true"
-            indicator = ""
-            if is_active:
-                indicator = " ▲" if port_sort_asc else " ▼"
-            return f'<th><a href="?sort={col_key}&asc={next_asc}" target="_self">{label}{indicator}</a></th>'
-
-        # Render Table with clickable header hyperlinks
-        port_html = '<div style="overflow-x: auto; margin-bottom: 20px;">'
-        port_html += '<table class="sheet-table"><thead><tr>'
-        port_html += make_th("TICKER", "ticker")
-        port_html += '<th>ASSET NAME</th>'
-        port_html += make_th("SHARES", "shares")
-        port_html += make_th("AVG COST", "cost")
-        port_html += make_th("MARK PRICE", "price")
-        port_html += make_th("MARKET VALUE", "mval")
-        port_html += make_th("TODAY ($)", "daily_dlr")
-        port_html += make_th("TODAY (%)", "daily_pct")
-        port_html += make_th("UNREALIZED ($)", "overall_dlr")
-        port_html += make_th("UNREALIZED (%)", "overall_pct")
-        port_html += '<th style="text-align:center;">SIGNAL</th>'
-        port_html += '<th style="text-align:center;">30D TREND</th>'
-        port_html += '</tr></thead><tbody>'
+        # Render Table with data-val attributes and instant client-side JS sort
+        port_html = """
+        <div style="overflow-x: auto; margin-bottom: 20px;">
+        <table id="portfolio-table" class="sheet-table">
+            <thead>
+                <tr>
+                    <th class="sortable-th" onclick="sortPortfolioTable(0, 'str')">TICKER <span class="arrow"></span></th>
+                    <th class="sortable-th" onclick="sortPortfolioTable(1, 'str')">ASSET NAME <span class="arrow"></span></th>
+                    <th class="sortable-th" onclick="sortPortfolioTable(2, 'num')">SHARES <span class="arrow"></span></th>
+                    <th class="sortable-th" onclick="sortPortfolioTable(3, 'num')">AVG COST <span class="arrow"></span></th>
+                    <th class="sortable-th" onclick="sortPortfolioTable(4, 'num')">MARK PRICE <span class="arrow"></span></th>
+                    <th class="sortable-th" onclick="sortPortfolioTable(5, 'num')">MARKET VALUE <span class="arrow">▼</span></th>
+                    <th class="sortable-th" onclick="sortPortfolioTable(6, 'num')">TODAY ($) <span class="arrow"></span></th>
+                    <th class="sortable-th" onclick="sortPortfolioTable(7, 'num')">TODAY (%) <span class="arrow"></span></th>
+                    <th class="sortable-th" onclick="sortPortfolioTable(8, 'num')">UNREALIZED ($) <span class="arrow"></span></th>
+                    <th class="sortable-th" onclick="sortPortfolioTable(9, 'num')">UNREALIZED (%) <span class="arrow"></span></th>
+                    <th style="text-align:center;">SIGNAL</th>
+                    <th style="text-align:center;">30D TREND</th>
+                </tr>
+            </thead>
+            <tbody>
+        """
         
         for r in port_rows:
             c_daily = "pos-cell" if r["daily_dlr"] >= 0 else "neg-cell"
@@ -503,9 +495,59 @@ with tab_portfolio:
             cue = '<span class="bullish-badge">BULL</span>' if r["bullish"] else '<span class="bearish-badge">BEAR</span>'
             spark = make_svg_sparkline(r["sparkline"], is_positive=(r["overall_dlr"] >= 0))
             
-            port_html += f'<tr><td style="font-weight:700;">{r["ticker"]}</td><td>{r["name"]}</td><td>{r["shares"]:,}</td><td>${r["cost"]:.2f}</td><td>${r["price"]:.2f}</td><td>${r["mval"]:,.2f}</td><td class="{c_daily}">{s_daily_dlr}${r["daily_dlr"]:,.2f}</td><td class="{c_daily}">{s_daily_pct}{r["daily_pct"]:.2f}%</td><td class="{c_overall}">{s_overall_dlr}${r["overall_dlr"]:,.2f}</td><td class="{c_overall}">{s_overall_pct}{r["overall_pct"]:.2f}%</td><td style="text-align:center;">{cue}</td><td style="text-align:center;">{spark}</td></tr>'
+            port_html += f"""
+            <tr>
+                <td style="font-weight:700;" data-val="{r['ticker']}">{r['ticker']}</td>
+                <td data-val="{r['name']}">{r['name']}</td>
+                <td data-val="{r['shares']}">{r['shares']:,}</td>
+                <td data-val="{r['cost']}">$ {r['cost']:.2f}</td>
+                <td data-val="{r['price']}">$ {r['price']:.2f}</td>
+                <td data-val="{r['mval']}">$ {r['mval']:,.2f}</td>
+                <td class="{c_daily}" data-val="{r['daily_dlr']}">{s_daily_dlr}$ {r['daily_dlr']:,.2f}</td>
+                <td class="{c_daily}" data-val="{r['daily_pct']}">{s_daily_pct}{r['daily_pct']:.2f}%</td>
+                <td class="{c_overall}" data-val="{r['overall_dlr']}">{s_overall_dlr}$ {r['overall_dlr']:,.2f}</td>
+                <td class="{c_overall}" data-val="{r['overall_pct']}">{s_overall_pct}{r['overall_pct']:.2f}%</td>
+                <td style="text-align:center;">{cue}</td>
+                <td style="text-align:center;">{spark}</td>
+            </tr>
+            """
         
-        port_html += '</tbody></table></div>'
+        port_html += """
+            </tbody>
+        </table>
+        </div>
+        <script>
+        function sortPortfolioTable(colIdx, type) {
+            const table = document.getElementById("portfolio-table");
+            if (!table) return;
+            const tbody = table.querySelector("tbody");
+            const rows = Array.from(tbody.querySelectorAll("tr"));
+            const th = table.querySelectorAll("th")[colIdx];
+            
+            const isAsc = th.getAttribute("data-sort") === "asc";
+            const dir = isAsc ? -1 : 1;
+            
+            table.querySelectorAll("th .arrow").forEach(el => el.textContent = "");
+            th.querySelector(".arrow").textContent = isAsc ? " ▼" : " ▲";
+            th.setAttribute("data-sort", isAsc ? "desc" : "asc");
+            
+            rows.sort((a, b) => {
+                const cellA = a.children[colIdx].getAttribute("data-val");
+                const cellB = b.children[colIdx].getAttribute("data-val");
+                
+                if (type === 'num') {
+                    const numA = parseFloat(cellA) || 0;
+                    const numB = parseFloat(cellB) || 0;
+                    return (numA - numB) * dir;
+                } else {
+                    return cellA.localeCompare(cellB) * dir;
+                }
+            });
+            
+            rows.forEach(r => tbody.appendChild(r));
+        }
+        </script>
+        """
         render_html(port_html)
     else:
         st.info("NO PORTFOLIO POSITIONS AVAILABLE.")
@@ -639,7 +681,7 @@ with tab_sector:
 # ---------------------------------------------------------
 COMMODITIES_REGISTRY = [
     {"group": "Crude Oil", "benchmark": "WTI Light Sweet Crude", "ticker": "USO", "name": "United States Oil Fund LP", "leverage": "1x Spot / Front-Month", "expense": "0.60%"},
-    {"group": "Crude Oil", "benchmark": "Bloomberg WTI Crude Subindex", "ticker": "UCO", "name": "ProShares Ultra Bloomberg Crude", "leverage": "2x Leveraged Long", "expense": "0.95%"},
+    {"group": "Crude Oil", "benchmark": "Bloomberg WTI Crude Subindex", "ticker": "UCO", "name": "ProShares Ultra Bloomberg Crude", "leverage": "2x Daily Leveraged Long", "expense": "0.95%"},
     {"group": "Crude Oil", "benchmark": "Bloomberg WTI Crude Subindex", "ticker": "SCO", "name": "ProShares UltraShort Bloomberg Crude", "leverage": "-2x Leveraged Inverse", "expense": "0.95%"},
     {"group": "Crude Oil", "benchmark": "WTI Crude Futures (12-Month)", "ticker": "USL", "name": "United States 12 Month Oil Fund", "leverage": "1x 12-Month Strip Curve", "expense": "0.90%"},
     {"group": "Crude Oil", "benchmark": "ICE Brent Crude Futures", "ticker": "BNO", "name": "United States Brent Oil Fund LP", "leverage": "1x Front-Month Brent", "expense": "1.02%"},
@@ -647,7 +689,7 @@ COMMODITIES_REGISTRY = [
     {"group": "Refined Products", "benchmark": "DBIQ Optimum Yield Energy", "ticker": "DBE", "name": "Invesco DB Energy Fund", "leverage": "1x Multi-Fuel & Heating Oil", "expense": "0.77%"},
     {"group": "Refined Products", "benchmark": "MVIS Global Oil Refiners", "ticker": "CRAK", "name": "VanEck Oil Refiners ETF", "leverage": "1x Crack Spread Refiners", "expense": "0.60%"},
     {"group": "Natural Gas", "benchmark": "Henry Hub Natural Gas", "ticker": "UNG", "name": "United States Natural Gas Fund", "leverage": "1x Front-Month Nat Gas", "expense": "1.06%"},
-    {"group": "Natural Gas", "benchmark": "Bloomberg Nat Gas Subindex", "ticker": "BOIL", "name": "ProShares Ultra Bloomberg Nat Gas", "leverage": "2x Leveraged Long", "expense": "0.95%"},
+    {"group": "Natural Gas", "benchmark": "Bloomberg Nat Gas Subindex", "ticker": "BOIL", "name": "ProShares Ultra Bloomberg Nat Gas", "leverage": "2x Daily Leveraged Long", "expense": "0.95%"},
     {"group": "Natural Gas", "benchmark": "Bloomberg Nat Gas Subindex", "ticker": "KOLD", "name": "ProShares UltraShort Nat Gas", "leverage": "-2x Leveraged Inverse", "expense": "0.95%"},
     {"group": "Biofuels", "benchmark": "CBOT Corn Futures", "ticker": "CORN", "name": "Teucrium Corn Fund", "leverage": "1x Ethanol Feedstock", "expense": "0.26%"},
     {"group": "Biofuels", "benchmark": "US Ethanol Production", "ticker": "GPRE", "name": "Green Plains Inc.", "leverage": "1x Pure Ethanol Refiner", "expense": "Operating"},
