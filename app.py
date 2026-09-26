@@ -23,7 +23,6 @@ def render_html(html_code):
 css_styling = """
 <style>
     .block-container {
-        /* Increased padding-top so content is never hidden behind Streamlit's fixed navbar */
         padding-top: 4.5rem !important;
         padding-bottom: 2rem !important;
         padding-left: 2rem !important;
@@ -254,17 +253,18 @@ def load_portfolio_holdings():
         return []
     
     try:
-        df = pd.read_csv(csv_files[0])
+        df = pd.read_csv(csv_files[0], on_bad_lines='skip')
     except Exception:
         return []
         
-    # Standardize column headers to lowercase for flexible matching
     df.columns = [str(c).strip().lower() for c in df.columns]
     
-    # Locate column names dynamically regardless of Fidelity capitalization
     symbol_col = next((c for c in df.columns if "symbol" in c), None)
     qty_col = next((c for c in df.columns if "quantity" in c or "qty" in c or "shares" in c), None)
-    cost_col = next((c for c in df.columns if "cost basis" in c or "avg cost" in c or "basis" in c), None)
+    
+    # Correctly identify average per-share cost vs. total cost basis
+    avg_cost_col = next((c for c in df.columns if "average cost" in c or "avg cost" in c or "cost/share" in c), None)
+    total_cost_col = next((c for c in df.columns if "cost basis total" in c or "total cost" in c), None)
 
     if not symbol_col:
         return []
@@ -273,7 +273,6 @@ def load_portfolio_holdings():
     for _, row in df.iterrows():
         symbol = str(row.get(symbol_col, "")).strip().upper()
         
-        # Clean symbol: exclude disclaimers, account titles, pending trades, cash core
         if not symbol or symbol in ["NAN", "NONE", ""] or any(
             symbol.startswith(prefix) for prefix in ["PENDING", "THE DATA", "BROKERAGE", "DATE", "ACCOUNT"]
         ):
@@ -283,18 +282,21 @@ def load_portfolio_holdings():
             continue
         
         try:
-            # Parse Quantity
             qty_raw = str(row.get(qty_col, 0)).replace(",", "").strip() if qty_col else "0"
             qty = float(qty_raw) if qty_raw not in ["nan", "None", "--", "n/a", ""] else 0.0
             if qty <= 0:
                 continue
 
-            # Parse Cost Basis (gracefully handles '--', 'n/a', and pending lots)
+            # Prioritize extracting average per-share cost directly
             cost = 0.0
-            if cost_col:
-                cost_raw = str(row.get(cost_col, "0")).replace("$", "").replace(",", "").strip()
+            if avg_cost_col:
+                cost_raw = str(row.get(avg_cost_col, "0")).replace("$", "").replace(",", "").strip()
                 if cost_raw not in ["nan", "None", "--", "n/a", "", "null"]:
                     cost = float(cost_raw)
+            elif total_cost_col:
+                tot_raw = str(row.get(total_cost_col, "0")).replace("$", "").replace(",", "").strip()
+                if tot_raw not in ["nan", "None", "--", "n/a", "", "null"]:
+                    cost = float(tot_raw) / qty
 
             holdings.append({
                 "ticker": symbol,
@@ -304,7 +306,7 @@ def load_portfolio_holdings():
         except Exception:
             continue
             
-    # Aggregate multiple lots of the same symbol (e.g., cash vs. margin lots)
+    # Aggregate multiple lots of the same symbol (e.g. Cash & Margin VOO lots)
     agg_holdings = {}
     for h in holdings:
         t = h["ticker"]
@@ -328,13 +330,6 @@ with tab_portfolio:
     st.markdown("<div class='section-banner'>PORTFOLIO HOLDINGS & REAL-TIME PERFORMANCE</div>", unsafe_allow_html=True)
     
     portfolio_holdings = load_portfolio_holdings()
-    
-    # Debug info to verify loaded positions
-    st.write(f"**Debug Info:** Loaded **{len(portfolio_holdings)}** positions from CSV.")
-    if portfolio_holdings:
-        st.write("Holdings detected:", [h['ticker'] for h in portfolio_holdings])
-    else:
-        st.warning("No holdings parsed from CSV. Showing fallback portfolio.")
     
     # Fallback if no CSV found
     if not portfolio_holdings:
