@@ -23,7 +23,8 @@ def render_html(html_code):
 css_styling = """
 <style>
     .block-container {
-        padding-top: 1.5rem !important;
+        /* Increased padding-top so content is never hidden behind Streamlit's fixed navbar */
+        padding-top: 4.5rem !important;
         padding-bottom: 2rem !important;
         padding-left: 2rem !important;
         padding-right: 2rem !important;
@@ -252,40 +253,58 @@ def load_portfolio_holdings():
     if not csv_files:
         return []
     
-    # Read Fidelity CSV directly (Fidelity portfolio exports have columns on row 0)
     try:
         df = pd.read_csv(csv_files[0])
     except Exception:
         return []
         
+    # Standardize column headers to lowercase for flexible matching
+    df.columns = [str(c).strip().lower() for c in df.columns]
+    
+    # Locate column names dynamically regardless of Fidelity capitalization
+    symbol_col = next((c for c in df.columns if "symbol" in c), None)
+    qty_col = next((c for c in df.columns if "quantity" in c or "qty" in c or "shares" in c), None)
+    cost_col = next((c for c in df.columns if "cost basis" in c or "avg cost" in c or "basis" in c), None)
+
+    if not symbol_col:
+        return []
+
     holdings = []
     for _, row in df.iterrows():
-        symbol = str(row.get("Symbol", "")).strip()
-        # Clean symbol
-        if not symbol or symbol == "nan" or symbol.startswith("Pending") or symbol.startswith("The data") or symbol.startswith("Brokerage") or symbol.startswith("Date") or symbol.startswith("Account"):
+        symbol = str(row.get(symbol_col, "")).strip().upper()
+        
+        # Clean symbol: exclude disclaimers, account titles, pending trades, cash core
+        if not symbol or symbol in ["NAN", "NONE", ""] or any(
+            symbol.startswith(prefix) for prefix in ["PENDING", "THE DATA", "BROKERAGE", "DATE", "ACCOUNT"]
+        ):
             continue
         
         if "**" in symbol or symbol in ["SPAXX", "FDRXX", "FCASH"]:
             continue
         
         try:
-            qty_raw = str(row.get("Quantity", 0)).replace(",", "").strip()
-            qty = float(qty_raw) if qty_raw and qty_raw != "nan" else 0.0
+            # Parse Quantity
+            qty_raw = str(row.get(qty_col, 0)).replace(",", "").strip() if qty_col else "0"
+            qty = float(qty_raw) if qty_raw not in ["nan", "None", "--", "n/a", ""] else 0.0
             if qty <= 0:
                 continue
-            
-            cost_raw = str(row.get("Average cost basis", "0")).replace("$", "").replace(",", "").strip()
-            cost = float(cost_raw) if cost_raw and cost_raw != "nan" and cost_raw != "n/a" else 0.0
-            
+
+            # Parse Cost Basis (gracefully handles '--', 'n/a', and pending lots)
+            cost = 0.0
+            if cost_col:
+                cost_raw = str(row.get(cost_col, "0")).replace("$", "").replace(",", "").strip()
+                if cost_raw not in ["nan", "None", "--", "n/a", "", "null"]:
+                    cost = float(cost_raw)
+
             holdings.append({
-                "ticker": symbol.upper(),
+                "ticker": symbol,
                 "shares": qty,
                 "cost": cost
             })
         except Exception:
             continue
             
-    # Aggregate multiple lots of the same symbol (e.g., VOO Cash & Margin lots)
+    # Aggregate multiple lots of the same symbol (e.g., cash vs. margin lots)
     agg_holdings = {}
     for h in holdings:
         t = h["ticker"]
@@ -310,7 +329,7 @@ with tab_portfolio:
     
     portfolio_holdings = load_portfolio_holdings()
     
-    # Debug info right in the main window so you can see what's loaded
+    # Debug info to verify loaded positions
     st.write(f"**Debug Info:** Loaded **{len(portfolio_holdings)}** positions from CSV.")
     if portfolio_holdings:
         st.write("Holdings detected:", [h['ticker'] for h in portfolio_holdings])
@@ -407,6 +426,9 @@ with tab_portfolio:
     else:
         st.info("No portfolio data available.")
 
+# ---------------------------------------------------------
+# 2. ACTIVE SECTOR EXPLORER TAB
+# ---------------------------------------------------------
 SECTOR_DATASETS = {
     "Information Technology": [
         "AAPL", "NVDA", "MSFT", "AVGO", "ORCL", "CRM", "AMD", "QCOM", "ADBE", "INTC", "TXN", "MU", "CRDO", "MRVL"
