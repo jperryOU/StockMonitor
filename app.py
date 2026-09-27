@@ -8,6 +8,7 @@ import io
 import os
 import time
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 
 st.set_page_config(
     page_title="SECTOR INTELLIGENCE & MOMENTUM TERMINAL",
@@ -172,7 +173,10 @@ thm = THEMES[st.session_state.theme_choice]
 
 if st.sidebar.button("FORCE REFRESH LOCAL CACHE", use_container_width=True):
     if os.path.exists(DB_FILE):
-        os.remove(DB_FILE)
+        try:
+            os.remove(DB_FILE)
+        except Exception:
+            pass
     st.cache_data.clear()
     st.rerun()
 
@@ -410,11 +414,11 @@ css_styling = f"""
 render_html(css_styling)
 
 # ---------------------------------------------------------
-# TIER 1: 1,000-STOCK UNIVERSE & SQLITE CACHING WITH PROGRESS BAR
+# TIER 1: 1,000-STOCK UNIVERSE & SQLITE CACHING
 # ---------------------------------------------------------
 @st.cache_data(ttl=86400)
 def get_universe_tickers():
-    """Scrapes S&P 500 + S&P 400 MidCap constituents for top ~900-1000 US market cap equities."""
+    """Scrapes S&P 500 + S&P 400 MidCap constituents for top ~900-1000 US equities."""
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     tickers_meta = []
     
@@ -493,9 +497,7 @@ def get_universe_tickers():
     return cleaned
 
 def load_or_update_universe():
-    """Option A Engine with Live Batch Progress Bar:
-       Checks if local SQLite DB is under 30 minutes old.
-       If fresh -> reads in 5ms. If stale -> performs chunked batch download with visible progress bar."""
+    """Option A Engine with Auto-Disappearing Progress Bar."""
     now = time.time()
     db_needs_sync = True
 
@@ -528,18 +530,19 @@ def load_or_update_universe():
     batch_size = 50
     records = []
 
-    progress_box = st.container()
-    with progress_box:
-        st.markdown("<div class='section-banner'>DATABASE SYNC // DOWNLOADING 1,000 CONSTITUENTS (30-MIN CYCLE)</div>", unsafe_allow_html=True)
-        prog_bar = st.progress(0.0)
-        status_text = st.empty()
+    # st.empty placeholder allows clean complete removal from the DOM
+    progress_slot = st.empty()
 
     for i in range(0, total_symbols, batch_size):
         chunk = all_symbols[i:i + batch_size]
         curr_done = min(i + len(chunk), total_symbols)
         pct = curr_done / total_symbols
-        prog_bar.progress(pct)
-        status_text.markdown(f"<span style='font-size:11px; font-weight:700;'>DOWNLOADING & CACHING: {curr_done} / {total_symbols} STOCKS ({pct * 100:.1f}%)</span>", unsafe_allow_html=True)
+        
+        # Render into slot
+        with progress_slot.container():
+            st.markdown("<div class='section-banner'>DATABASE SYNC // DOWNLOADING 1,000 CONSTITUENTS (30-MIN CYCLE)</div>", unsafe_allow_html=True)
+            st.progress(pct)
+            st.markdown(f"<span style='font-size:11px; font-weight:700;'>DOWNLOADING & CACHING: {curr_done} / {total_symbols} STOCKS ({pct * 100:.1f}%)</span>", unsafe_allow_html=True)
 
         try:
             raw_chunk = yf.download(chunk, period="6mo", group_by="ticker", threads=True, progress=False)
@@ -599,7 +602,8 @@ def load_or_update_universe():
             except Exception:
                 continue
 
-    progress_box.empty()
+    # Cleanly remove progress elements from the page
+    progress_slot.empty()
 
     df_out = pd.DataFrame(records)
     conn = sqlite3.connect(DB_FILE)
@@ -614,56 +618,73 @@ for sec, grp in UNIVERSE_DF.groupby("sector"):
     SECTOR_DATASETS[sec] = grp["ticker"].tolist()
 
 # ---------------------------------------------------------
-# TIER 2: 60-SECOND LIVE QUOTE REFRESH (DISPLAYED STOCKS ONLY)
+# TIER 2: ULTRA-FAST PARALLEL LIVE QUOTE FETCHER
 # ---------------------------------------------------------
 @st.cache_data(ttl=60)
 def fetch_live_active_quotes(tickers):
-    """Real-time 60-second updates for only the displayed tickers on screen."""
-    live_dict = {}
-    for t in tickers:
-        try:
-            ticker = t.strip().upper()
-            stock = yf.Ticker(ticker)
-            df = stock.history(period="1mo")
-            if df.empty or len(df) < 2:
-                continue
-            close = df["Close"].dropna()
-            volume = df["Volume"].dropna()
+    """Downloads history in 1 vectorized batch and fetches info across 20 parallel threads."""
+    if not tickers:
+        return {}
+    tickers = [t.strip().upper() for t in tickers]
 
-            info = stock.info or {}
-            mcap = info.get("marketCap", None)
-            pe = info.get("trailingPE", None)
-            fwd_pe = info.get("forwardPE", None)
-            peg = info.get("pegRatio", None)
-            beta = info.get("beta", None)
+    # 1. Batch download history in 1 network call
+    try:
+        hist_raw = yf.download(tickers, period="1mo", group_by="ticker", threads=True, progress=False)
+    except Exception:
+        hist_raw = pd.DataFrame()
+
+    # 2. Worker for fetching fundamentals in parallel
+    def fetch_single(sym):
+        try:
+            s = yf.Ticker(sym)
+            spark = []
+            p_last = None
+            p_prev = None
+            if not hist_raw.empty:
+                try:
+                    sub = hist_raw[sym].dropna() if len(tickers) > 1 else hist_raw.dropna()
+                    if len(sub) >= 2:
+                        c = sub["Close"]
+                        p_last = float(c.iloc[-1])
+                        p_prev = float(c.iloc[-2])
+                        hist_30 = c.iloc[-22:] if len(c) >= 22 else c
+                        spark = [float(p) for p in hist_30.tolist() if not pd.isna(p)]
+                except Exception:
+                    pass
+
+            info = s.info or {}
+            p_now = p_last or info.get("currentPrice") or info.get("regularMarketPrice") or 0.0
+            p_old = p_prev or info.get("previousClose") or p_now
+            chg_dlr = float(p_now - p_old)
+            chg_pct = float(chg_dlr / p_old * 100) if p_old > 0 else 0.0
+
             div_y = info.get("dividendYield", None)
             if div_y:
                 div_y = div_y * 100 if div_y < 1.0 else div_y
 
-            p_last = float(close.iloc[-1])
-            p_prev = float(close.iloc[-2])
-            chg_dlr = float(p_last - p_prev)
-            chg_pct = float(chg_dlr / p_prev * 100)
-
-            hist_30 = close.iloc[-22:] if len(close) >= 22 else close
-            spark = [float(p) for p in hist_30.tolist() if not pd.isna(p)]
-
-            live_dict[ticker] = {
-                "price": p_last,
+            return sym, {
+                "price": p_now,
                 "change_dlr": chg_dlr,
                 "change_pct": chg_pct,
-                "vol": int(volume.iloc[-1]),
-                "market_cap": mcap,
-                "pe_ratio": pe,
-                "fwd_pe": fwd_pe,
-                "peg_ratio": peg,
-                "beta": beta,
+                "vol": int(info.get("volume") or info.get("regularMarketVolume") or 0),
+                "market_cap": info.get("marketCap", None),
+                "pe_ratio": info.get("trailingPE", None),
+                "fwd_pe": info.get("forwardPE", None),
+                "peg_ratio": info.get("pegRatio", None),
+                "beta": info.get("beta", None),
                 "div_yield": div_y,
                 "sparkline": spark
             }
         except Exception:
-            continue
-    return live_dict
+            return sym, {}
+
+    # Parallelize info requests across 20 workers
+    results = {}
+    with ThreadPoolExecutor(max_workers=min(20, len(tickers))) as executor:
+        for sym, d in executor.map(fetch_single, tickers):
+            if d:
+                results[sym] = d
+    return results
 
 def make_svg_sparkline(prices, is_positive=True, width=90, height=18):
     if not prices or len(prices) < 2:
@@ -961,7 +982,7 @@ with tab_portfolio:
         st.info("NO PORTFOLIO POSITIONS AVAILABLE.")
 
 # ---------------------------------------------------------
-# TAB 2: SECTOR EXPLORER
+# TAB 2: SECTOR EXPLORER (FAST PARALLEL ENGINE)
 # ---------------------------------------------------------
 with tab_sector:
     col_sel, col_tgl_f, col_tgl_t = st.columns([1.5, 1, 1.2])
@@ -979,7 +1000,7 @@ with tab_sector:
         st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
         show_technicals = st.toggle("Advanced Technicals (14D RSI, 50D Spread, RVOL, RS vs SPY)", value=False)
 
-    sector_sub_df = UNIVERSE_DF[UNIVERSE_DF["sector"] == selected_sector].head(30)
+    sector_sub_df = UNIVERSE_DF[UNIVERSE_DF["sector"] == selected_sector].head(25)
     sector_tickers = sector_sub_df["ticker"].tolist()
     live_sec_data = fetch_live_active_quotes(sector_tickers)
 
@@ -1310,7 +1331,7 @@ with tab_scatter:
         st.info("NO DATA AVAILABLE FOR SELECTED MATRIX.")
 
 # ---------------------------------------------------------
-# TAB 4: COMPOSITE FACTOR RANKING LEADERBOARD (INVERTED RSI FIX)
+# TAB 4: COMPOSITE FACTOR RANKING LEADERBOARD (INVERTED RSI)
 # ---------------------------------------------------------
 with tab_rankings:
     st.markdown("<div class='section-banner'>MULTI-FACTOR COMPOSITE LEADERBOARD // QUANTITATIVE FACTOR SCORING</div>", unsafe_allow_html=True)
@@ -1392,13 +1413,12 @@ with tab_rankings:
         df_rank["r_alpha"] = df_rank["rs_spy"].rank(ascending=False, method="min").astype(int)
         df_rank["r_rvol"] = df_rank["rvol"].rank(ascending=False, method="min").astype(int)
         
-        # RSI INVERTED: Lower RSI receives a better rank number (1 = oversold/cooler)
+        # Inverted RSI: cooler/lower RSI = rank 1 (Best)
         df_rank["r_rsi"] = df_rank["rsi"].rank(ascending=True, method="min").astype(int)
         
         df_rank["r_val"] = df_rank["fwd_pe"].rank(ascending=True, method="min").astype(int)
         df_rank["r_peg"] = df_rank["peg"].rank(ascending=True, method="min").astype(int)
 
-        # Composite score = average rank across the 6 factors
         rank_cols = ["r_mom", "r_alpha", "r_rvol", "r_rsi", "r_val", "r_peg"]
         df_rank["composite_score"] = df_rank[rank_cols].mean(axis=1)
         df_rank = df_rank.sort_values(by="composite_score", ascending=True).reset_index(drop=True)
@@ -1547,7 +1567,7 @@ with tab_glossary:
     with g_col2:
         st.markdown("""
         ### ADVANCED TECHNICAL INDICATORS & SIGNALS
-        * **14D RSI (Relative Strength Index):** Velocity oscillator measured from 0 to 100[cite: 9]. Readings above **70** indicate overbought/extended conditions; readings below **30** indicate oversold washouts[cite: 8, 9]. In the composite factor model, lower RSI is awarded a lower rank (Rank #1) to prioritize cooler, reset entries over extended tops.
+        * **14D RSI (Relative Strength Index):** Velocity oscillator measured from 0 to 100. Readings above **70** indicate overbought/extended conditions; readings below **30** indicate oversold washouts. In the composite factor model, lower RSI receives a lower rank (Rank #1) to prioritize cooler, reset entries over extended tops.
         * **50D Spread (% Distance from 50 SMA):** Quantitative extension relative to the institutional 50-day moving average. Positive values confirm an ongoing uptrend; values exceeding **+12% to +15%** flag severe overextension where institutional buying typically pauses.
         * **RVOL (Relative Volume):** Ratio of today's volume to the 20-day historical average. An RVOL above **1.50x** confirms heavy institutional participation and authentic breakouts/rotations, while an RVOL below **0.70x** signals low-conviction chop.
         * **RS vs. SPY (30D Alpha):** Net 30-day percentage outperformance against the S&P 500 ($\\text{Stock 30D \\%} - \\text{SPY 30D \\%}$). Positive values highlight the true leaders attracting rotated institutional capital.
