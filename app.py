@@ -414,7 +414,7 @@ css_styling = f"""
 render_html(css_styling)
 
 # ---------------------------------------------------------
-# TIER 1: 1,000-STOCK UNIVERSE & SQLITE CACHING
+# TIER 1: CONSTITUENT UNIVERSE SCRAPER & SQLITE CACHING
 # ---------------------------------------------------------
 @st.cache_data(ttl=86400)
 def get_universe_tickers():
@@ -497,7 +497,8 @@ def get_universe_tickers():
     return cleaned
 
 def load_or_update_universe():
-    """Option A Engine with Auto-Disappearing Progress Bar."""
+    """Checks if local SQLite DB is under 30 minutes old.
+       If fresh -> reads in 5ms. If stale -> performs chunked batch download with visible progress bar."""
     now = time.time()
     db_needs_sync = True
 
@@ -508,9 +509,8 @@ def load_or_update_universe():
 
     if not db_needs_sync:
         try:
-            conn = sqlite3.connect(DB_FILE)
-            df = pd.read_sql("SELECT * FROM constituents_1000", conn)
-            conn.close()
+            with sqlite3.connect(DB_FILE, timeout=15) as conn:
+                df = pd.read_sql("SELECT * FROM constituents_1000", conn)
             if not df.empty:
                 return df
         except Exception:
@@ -530,7 +530,7 @@ def load_or_update_universe():
     batch_size = 50
     records = []
 
-    # st.empty placeholder allows clean complete removal from the DOM
+    # Dedicated slot for progress display
     progress_slot = st.empty()
 
     for i in range(0, total_symbols, batch_size):
@@ -538,7 +538,6 @@ def load_or_update_universe():
         curr_done = min(i + len(chunk), total_symbols)
         pct = curr_done / total_symbols
         
-        # Render into slot
         with progress_slot.container():
             st.markdown("<div class='section-banner'>DATABASE SYNC // DOWNLOADING 1,000 CONSTITUENTS (30-MIN CYCLE)</div>", unsafe_allow_html=True)
             st.progress(pct)
@@ -602,88 +601,110 @@ def load_or_update_universe():
             except Exception:
                 continue
 
-    # Cleanly remove progress elements from the page
+    # Disappear completely
     progress_slot.empty()
 
     df_out = pd.DataFrame(records)
-    conn = sqlite3.connect(DB_FILE)
-    df_out.to_sql("constituents_1000", conn, if_exists="replace", index=False)
-    conn.close()
+    with sqlite3.connect(DB_FILE, timeout=15) as conn:
+        df_out.to_sql("constituents_1000", conn, if_exists="replace", index=False)
     return df_out
 
-UNIVERSE_DF = load_or_update_universe()
+# Optimization 1: RAM-Cache the SQLite DataFrame so widget interactions don't touch disk
+@st.cache_data(ttl=600)
+def get_cached_universe_df():
+    return load_or_update_universe()
+
+UNIVERSE_DF = get_cached_universe_df()
 
 SECTOR_DATASETS = {}
 for sec, grp in UNIVERSE_DF.groupby("sector"):
     SECTOR_DATASETS[sec] = grp["ticker"].tolist()
 
 # ---------------------------------------------------------
-# TIER 2: ULTRA-FAST PARALLEL LIVE QUOTE FETCHER
+# TIER 2: OPTIMIZATION - DECOUPLE PRICES (FAST) & FUNDAMENTALS (CACHED)
 # ---------------------------------------------------------
-@st.cache_data(ttl=60)
-def fetch_live_active_quotes(tickers):
-    """Downloads history in 1 vectorized batch and fetches info across 20 parallel threads."""
+@st.cache_data(ttl=1800)
+def fetch_fundamentals_cached(tickers):
+    """Caches fundamental ratios with a 30-min TTL so switching sectors avoids unneeded HTTP calls."""
     if not tickers:
         return {}
-    tickers = [t.strip().upper() for t in tickers]
-
-    # 1. Batch download history in 1 network call
-    try:
-        hist_raw = yf.download(tickers, period="1mo", group_by="ticker", threads=True, progress=False)
-    except Exception:
-        hist_raw = pd.DataFrame()
-
-    # 2. Worker for fetching fundamentals in parallel
-    def fetch_single(sym):
+    
+    def fetch_fund_single(sym):
         try:
             s = yf.Ticker(sym)
-            spark = []
-            p_last = None
-            p_prev = None
-            if not hist_raw.empty:
-                try:
-                    sub = hist_raw[sym].dropna() if len(tickers) > 1 else hist_raw.dropna()
-                    if len(sub) >= 2:
-                        c = sub["Close"]
-                        p_last = float(c.iloc[-1])
-                        p_prev = float(c.iloc[-2])
-                        hist_30 = c.iloc[-22:] if len(c) >= 22 else c
-                        spark = [float(p) for p in hist_30.tolist() if not pd.isna(p)]
-                except Exception:
-                    pass
-
             info = s.info or {}
-            p_now = p_last or info.get("currentPrice") or info.get("regularMarketPrice") or 0.0
-            p_old = p_prev or info.get("previousClose") or p_now
-            chg_dlr = float(p_now - p_old)
-            chg_pct = float(chg_dlr / p_old * 100) if p_old > 0 else 0.0
-
             div_y = info.get("dividendYield", None)
             if div_y:
                 div_y = div_y * 100 if div_y < 1.0 else div_y
-
             return sym, {
-                "price": p_now,
-                "change_dlr": chg_dlr,
-                "change_pct": chg_pct,
-                "vol": int(info.get("volume") or info.get("regularMarketVolume") or 0),
                 "market_cap": info.get("marketCap", None),
                 "pe_ratio": info.get("trailingPE", None),
                 "fwd_pe": info.get("forwardPE", None),
                 "peg_ratio": info.get("pegRatio", None),
                 "beta": info.get("beta", None),
-                "div_yield": div_y,
-                "sparkline": spark
+                "div_yield": div_y
             }
         except Exception:
             return sym, {}
 
-    # Parallelize info requests across 20 workers
-    results = {}
+    res = {}
     with ThreadPoolExecutor(max_workers=min(20, len(tickers))) as executor:
-        for sym, d in executor.map(fetch_single, tickers):
+        for sym, d in executor.map(fetch_fund_single, tickers):
             if d:
-                results[sym] = d
+                res[sym] = d
+    return res
+
+@st.cache_data(ttl=60)
+def fetch_live_active_quotes(tickers):
+    """Fetches real-time price & volume via 1 vectorized batch call, merging with cached fundamentals."""
+    if not tickers:
+        return {}
+    tickers = [t.strip().upper() for t in tickers]
+
+    # 1. Vectorized price batch (Fast ~0.5 - 1.0s)
+    try:
+        hist_raw = yf.download(tickers, period="1mo", group_by="ticker", threads=True, progress=False)
+    except Exception:
+        hist_raw = pd.DataFrame()
+
+    # 2. Get cached fundamentals without re-hitting Yahoo info endpoints every minute
+    funds = fetch_fundamentals_cached(tuple(tickers))
+
+    results = {}
+    for sym in tickers:
+        p_now, chg_dlr, chg_pct = 0.0, 0.0, 0.0
+        vol = 0
+        spark = []
+        if not hist_raw.empty:
+            try:
+                sub = hist_raw[sym].dropna() if len(tickers) > 1 else hist_raw.dropna()
+                if len(sub) >= 2:
+                    c = sub["Close"]
+                    v = sub["Volume"]
+                    p_now = float(c.iloc[-1])
+                    p_prev = float(c.iloc[-2])
+                    chg_dlr = float(p_now - p_prev)
+                    chg_pct = float(chg_dlr / p_prev * 100) if p_prev > 0 else 0.0
+                    vol = int(v.iloc[-1]) if len(v) > 0 else 0
+                    hist_30 = c.iloc[-22:] if len(c) >= 22 else c
+                    spark = [float(p) for p in hist_30.tolist() if not pd.isna(p)]
+            except Exception:
+                pass
+
+        f = funds.get(sym, {})
+        results[sym] = {
+            "price": p_now,
+            "change_dlr": chg_dlr,
+            "change_pct": chg_pct,
+            "vol": vol,
+            "market_cap": f.get("market_cap"),
+            "pe_ratio": f.get("pe_ratio"),
+            "fwd_pe": f.get("fwd_pe"),
+            "peg_ratio": f.get("peg_ratio"),
+            "beta": f.get("beta"),
+            "div_yield": f.get("div_yield"),
+            "sparkline": spark
+        }
     return results
 
 def make_svg_sparkline(prices, is_positive=True, width=90, height=18):
@@ -748,7 +769,7 @@ for i, ticker in enumerate(ALL_BENCH_TICKERS):
             label = next(b[1] for b in BENCHMARKS_EXTRA if b[0] == ticker)
             is_clickable_sector = False
             
-        if ticker in bench_live:
+        if ticker in bench_live and bench_live[ticker]["price"] > 0:
             d = bench_live[ticker]
             sign = "+" if d["change_pct"] >= 0 else ""
             btn_text = f"{label}  \n{ticker} {sign}{d['change_pct']:.1f}%"
@@ -982,7 +1003,7 @@ with tab_portfolio:
         st.info("NO PORTFOLIO POSITIONS AVAILABLE.")
 
 # ---------------------------------------------------------
-# TAB 2: SECTOR EXPLORER (FAST PARALLEL ENGINE)
+# TAB 2: SECTOR EXPLORER (INSTANT SECTOR SWITCHING)
 # ---------------------------------------------------------
 with tab_sector:
     col_sel, col_tgl_f, col_tgl_t = st.columns([1.5, 1, 1.2])
