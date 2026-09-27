@@ -410,7 +410,7 @@ css_styling = f"""
 render_html(css_styling)
 
 # ---------------------------------------------------------
-# TIER 1: 1,000-STOCK UNIVERSE & SQLITE CACHING ENGINE
+# TIER 1: 1,000-STOCK UNIVERSE & SQLITE CACHING WITH PROGRESS BAR
 # ---------------------------------------------------------
 @st.cache_data(ttl=86400)
 def get_universe_tickers():
@@ -442,7 +442,6 @@ def get_universe_tickers():
     except Exception:
         pass
 
-    # Fallback universe if network blocks Wikipedia table
     if len(tickers_meta) < 100:
         base_fallback = [
             ("AAPL", "Information Technology", "Apple Inc."),
@@ -485,7 +484,6 @@ def get_universe_tickers():
         ]
         tickers_meta = [{"ticker": t[0], "sector": t[1], "name": t[2]} for t in base_fallback]
 
-    # De-duplicate
     seen = set()
     cleaned = []
     for item in tickers_meta:
@@ -495,8 +493,9 @@ def get_universe_tickers():
     return cleaned
 
 def load_or_update_universe():
-    """Option A Engine: Checks if local SQLite DB is under 30 minutes old.
-       If fresh -> reads in 5ms. If stale -> performs heavy vectorized batch download."""
+    """Option A Engine with Live Batch Progress Bar:
+       Checks if local SQLite DB is under 30 minutes old.
+       If fresh -> reads in 5ms. If stale -> performs chunked batch download with visible progress bar."""
     now = time.time()
     db_needs_sync = True
 
@@ -515,26 +514,41 @@ def load_or_update_universe():
         except Exception:
             pass
 
-    # Heavy 30-Minute Cycle Sync
     universe_meta = get_universe_tickers()
     all_symbols = [m["ticker"] for m in universe_meta]
     meta_lookup = {m["ticker"]: m for m in universe_meta}
+    total_symbols = len(all_symbols)
 
-    with st.spinner("UPDATING LOCAL 1,000-STOCK UNIVERSE [30-MINUTE CYCLE]..."):
-        # Vectorized batch download for ~1,000 stocks (10-15 seconds)
-        raw = yf.download(all_symbols, period="6mo", group_by="ticker", threads=True, progress=False)
+    try:
+        spy_c = yf.download("SPY", period="6mo", progress=False)["Close"].dropna()
+        spy_30d = float((spy_c.iloc[-1] - spy_c.iloc[-22]) / spy_c.iloc[-22] * 100)
+    except Exception:
+        spy_30d = 0.0
 
-        # Baseline SPY 30-day gain for alpha calculation
+    batch_size = 50
+    records = []
+
+    progress_box = st.container()
+    with progress_box:
+        st.markdown("<div class='section-banner'>DATABASE SYNC // DOWNLOADING 1,000 CONSTITUENTS (30-MIN CYCLE)</div>", unsafe_allow_html=True)
+        prog_bar = st.progress(0.0)
+        status_text = st.empty()
+
+    for i in range(0, total_symbols, batch_size):
+        chunk = all_symbols[i:i + batch_size]
+        curr_done = min(i + len(chunk), total_symbols)
+        pct = curr_done / total_symbols
+        prog_bar.progress(pct)
+        status_text.markdown(f"<span style='font-size:11px; font-weight:700;'>DOWNLOADING & CACHING: {curr_done} / {total_symbols} STOCKS ({pct * 100:.1f}%)</span>", unsafe_allow_html=True)
+
         try:
-            spy_c = yf.download("SPY", period="6mo", progress=False)["Close"].dropna()
-            spy_30d = float((spy_c.iloc[-1] - spy_c.iloc[-22]) / spy_c.iloc[-22] * 100)
+            raw_chunk = yf.download(chunk, period="6mo", group_by="ticker", threads=True, progress=False)
         except Exception:
-            spy_30d = 0.0
+            continue
 
-        records = []
-        for sym in all_symbols:
+        for sym in chunk:
             try:
-                sub = raw[sym].dropna() if len(all_symbols) > 1 else raw.dropna()
+                sub = raw_chunk[sym].dropna() if len(chunk) > 1 else raw_chunk.dropna()
                 if len(sub) < 22:
                     continue
                 close = sub["Close"]
@@ -545,21 +559,18 @@ def load_or_update_universe():
                 gain_30 = float((p_last - close.iloc[-22]) / close.iloc[-22] * 100)
                 rs_alpha = round(gain_30 - spy_30d, 2)
 
-                # 50 SMA Distance
                 if len(close) >= 50:
                     sma_50 = float(close.rolling(50).mean().iloc[-1])
                     sma_50_dist = round(((p_last - sma_50) / sma_50) * 100, 2)
                 else:
                     sma_50_dist = 0.0
 
-                # RVOL (Volume vs 20-Day Mean)
                 if len(vol) >= 21:
                     vol_mean = float(vol.iloc[-21:-1].mean())
                     rvol = round(float(vol.iloc[-1]) / vol_mean, 2) if vol_mean > 0 else 1.0
                 else:
                     rvol = 1.0
 
-                # 14D RSI
                 delta = close.diff()
                 gain = delta.clip(lower=0).ewm(alpha=1/14, min_periods=14, adjust=False).mean()
                 loss = (-delta.clip(upper=0)).ewm(alpha=1/14, min_periods=14, adjust=False).mean()
@@ -567,7 +578,6 @@ def load_or_update_universe():
                 rsi = float((100.0 - (100.0 / (1.0 + rs))).iloc[-1])
                 rsi = round(rsi, 1) if not pd.isna(rsi) else 50.0
 
-                # 9/21 EMA Bullish Signal
                 ema_9 = close.ewm(span=9, adjust=False).mean().iloc[-1]
                 ema_21 = close.ewm(span=21, adjust=False).mean().iloc[-1]
                 bullish = 1 if ema_9 >= ema_21 else 0
@@ -589,26 +599,26 @@ def load_or_update_universe():
             except Exception:
                 continue
 
-        df_out = pd.DataFrame(records)
-        conn = sqlite3.connect(DB_FILE)
-        df_out.to_sql("constituents_1000", conn, if_exists="replace", index=False)
-        conn.close()
-        return df_out
+    progress_box.empty()
 
-# Load cached universe instantly
+    df_out = pd.DataFrame(records)
+    conn = sqlite3.connect(DB_FILE)
+    df_out.to_sql("constituents_1000", conn, if_exists="replace", index=False)
+    conn.close()
+    return df_out
+
 UNIVERSE_DF = load_or_update_universe()
 
-# Group tickers by sector dynamically from local database
 SECTOR_DATASETS = {}
 for sec, grp in UNIVERSE_DF.groupby("sector"):
     SECTOR_DATASETS[sec] = grp["ticker"].tolist()
 
 # ---------------------------------------------------------
-# TIER 2: 60-SECOND LIVE QUOTE REFRESH (ONLY ACTIVE DISPLAYED STOCKS)
+# TIER 2: 60-SECOND LIVE QUOTE REFRESH (DISPLAYED STOCKS ONLY)
 # ---------------------------------------------------------
 @st.cache_data(ttl=60)
 def fetch_live_active_quotes(tickers):
-    """Hits Yahoo Finance for real-time 60-second updates ONLY for the ~20-50 stocks currently on screen."""
+    """Real-time 60-second updates for only the displayed tickers on screen."""
     live_dict = {}
     for t in tickers:
         try:
@@ -1171,7 +1181,6 @@ with tab_scatter:
         size_label = st.selectbox("BUBBLE SIZE", size_opts, index=0)
         size_col = METRIC_REGISTRY[size_label]
 
-    # Filter constituents from cached universe
     sec_df = UNIVERSE_DF[UNIVERSE_DF["sector"] == scatter_sector].copy()
     if screener_mode == "Top Movers Today (Largest % Swings)":
         sec_df["abs_chg"] = sec_df["day_change"].abs()
@@ -1190,7 +1199,6 @@ with tab_scatter:
         extras = [t.strip().upper() for t in custom_input.split(",") if t.strip()]
         active_tickers = list(dict.fromkeys(active_tickers + extras))
 
-    # Fetch 60s live data ONLY for displayed subset
     live_subset = fetch_live_active_quotes(active_tickers)
 
     plot_rows = []
@@ -1302,14 +1310,15 @@ with tab_scatter:
         st.info("NO DATA AVAILABLE FOR SELECTED MATRIX.")
 
 # ---------------------------------------------------------
-# TAB 4: COMPOSITE FACTOR RANKING LEADERBOARD
+# TAB 4: COMPOSITE FACTOR RANKING LEADERBOARD (INVERTED RSI FIX)
 # ---------------------------------------------------------
 with tab_rankings:
     st.markdown("<div class='section-banner'>MULTI-FACTOR COMPOSITE LEADERBOARD // QUANTITATIVE FACTOR SCORING</div>", unsafe_allow_html=True)
     st.markdown(
         f"<p style='font-size:11.5px; color:{thm['card_border']}; margin-top:4px; margin-bottom:12px;'>"
         f"Each constituent is ranked from 1 to N across 6 metrics (30D Momentum, RS vs SPY Alpha, RVOL, 14D RSI, Forward P/E, PEG Ratio). "
-        f"<b>Lowest Average Score = #1 Ranked Stock</b> (Rank 1.0 is the best possible score)."
+        f"<b>Lowest Average Score = #1 Ranked Stock</b> (Rank 1.0 is the best possible score). "
+        f"<i>RSI is ranked ascending so cooler, oversold reset entries (lower numbers) receive top ranks.</i>"
         f"</p>",
         unsafe_allow_html=True
     )
@@ -1378,11 +1387,14 @@ with tab_rankings:
     if rank_raw:
         df_rank = pd.DataFrame(rank_raw)
         
-        # Calculate quantitative ranks (1 = best)
+        # 1 = best
         df_rank["r_mom"] = df_rank["gain_30"].rank(ascending=False, method="min").astype(int)
         df_rank["r_alpha"] = df_rank["rs_spy"].rank(ascending=False, method="min").astype(int)
         df_rank["r_rvol"] = df_rank["rvol"].rank(ascending=False, method="min").astype(int)
-        df_rank["r_rsi"] = df_rank["rsi"].rank(ascending=False, method="min").astype(int)
+        
+        # RSI INVERTED: Lower RSI receives a better rank number (1 = oversold/cooler)
+        df_rank["r_rsi"] = df_rank["rsi"].rank(ascending=True, method="min").astype(int)
+        
         df_rank["r_val"] = df_rank["fwd_pe"].rank(ascending=True, method="min").astype(int)
         df_rank["r_peg"] = df_rank["peg"].rank(ascending=True, method="min").astype(int)
 
@@ -1399,7 +1411,7 @@ with tab_rankings:
                 st.metric(
                     label=f"RANK #{leader['final_rank']} LEADER // {leader['ticker']}",
                     value=f"Score: {leader['composite_score']:.1f}",
-                    delta=f"{leader['gain_30']:+.1f}% 30D | RVOL {leader['rvol']:.2f}x"
+                    delta=f"{leader['gain_30']:+.1f}% 30D | RSI {leader['rsi']:.1f}"
                 )
 
         st.markdown("<div style='height:12px;'></div>", unsafe_allow_html=True)
@@ -1429,6 +1441,7 @@ with tab_rankings:
         for _, row in df_rank.iterrows():
             c_mom = "pos-cell" if row["gain_30"] >= 0 else "neg-cell"
             c_alpha = "pos-cell" if row["rs_spy"] >= 0 else "neg-cell"
+            c_rsi = "pos-cell" if row["rsi"] <= 45 else ("neg-cell" if row["rsi"] >= 70 else "")
             c_score = "pos-cell" if row["final_rank"] <= (len(df_rank) // 3) else ""
             spark = make_svg_sparkline(row["sparkline"], is_positive=(row["gain_30"] >= 0))
             badge_color = thm["badge_bull_bg"] if row["final_rank"] <= 3 else thm["card_bg"]
@@ -1444,7 +1457,7 @@ with tab_rankings:
                 <td class="{c_mom}">{row['gain_30']:+.1f}% (#{row['r_mom']})</td>
                 <td class="{c_alpha}">{row['rs_spy']:+.1f}% (#{row['r_alpha']})</td>
                 <td>{row['rvol']:.2f}x (#{row['r_rvol']})</td>
-                <td>{row['rsi']:.1f} (#{row['r_rsi']})</td>
+                <td class="{c_rsi}">{row['rsi']:.1f} (#{row['r_rsi']})</td>
                 <td>{row['fwd_pe_disp']} (#{row['r_val']})</td>
                 <td>{row['peg_disp']} (#{row['r_peg']})</td>
                 <td>{row['mcap_fmt']}</td>
@@ -1534,7 +1547,7 @@ with tab_glossary:
     with g_col2:
         st.markdown("""
         ### ADVANCED TECHNICAL INDICATORS & SIGNALS
-        * **14D RSI (Relative Strength Index):** Velocity oscillator measured from 0 to 100. Readings above **70** indicate overbought/extended conditions; readings below **30** indicate oversold washouts. Healthy growth stocks typically hold support between **45 and 55** during pullbacks.
+        * **14D RSI (Relative Strength Index):** Velocity oscillator measured from 0 to 100[cite: 9]. Readings above **70** indicate overbought/extended conditions; readings below **30** indicate oversold washouts[cite: 8, 9]. In the composite factor model, lower RSI is awarded a lower rank (Rank #1) to prioritize cooler, reset entries over extended tops.
         * **50D Spread (% Distance from 50 SMA):** Quantitative extension relative to the institutional 50-day moving average. Positive values confirm an ongoing uptrend; values exceeding **+12% to +15%** flag severe overextension where institutional buying typically pauses.
         * **RVOL (Relative Volume):** Ratio of today's volume to the 20-day historical average. An RVOL above **1.50x** confirms heavy institutional participation and authentic breakouts/rotations, while an RVOL below **0.70x** signals low-conviction chop.
         * **RS vs. SPY (30D Alpha):** Net 30-day percentage outperformance against the S&P 500 ($\\text{Stock 30D \\%} - \\text{SPY 30D \\%}$). Positive values highlight the true leaders attracting rotated institutional capital.
