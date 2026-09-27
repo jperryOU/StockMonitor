@@ -188,7 +188,7 @@ def render_html(html_code):
         st.markdown(clean, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# DYNAMIC THEMED CSS (NO EMOJIS, ZERO RADIUS)
+# DYNAMIC THEMED CSS (STRICT RECTANGULAR, NO EMOJIS)
 # ---------------------------------------------------------
 css_styling = f"""
 <style>
@@ -208,11 +208,8 @@ css_styling = f"""
         background-color: {thm['sidebar_bg']} !important;
         border-right: 1px solid {thm['sidebar_border']} !important;
     }}
-    section[data-testid="stSidebar"] * {{
-        color: {thm['text_color']} !important;
-    }}
-    div[data-testid="stSelectbox"] div[data-baseweb="select"],
-    div[data-testid="stSelectbox"] div[data-baseweb="select"] > div,
+    
+    /* COMPLETE FIX FOR SIDEBAR & MAIN BODY SELECTBOXES */
     div[data-baseweb="select"],
     div[data-baseweb="select"] > div,
     div[data-baseweb="select"] div,
@@ -240,6 +237,10 @@ css_styling = f"""
         background-color: {thm['card_hover']} !important;
         color: {thm['banner_text']} !important;
     }}
+    
+    section[data-testid="stSidebar"] label {{
+        color: {thm['text_color']} !important;
+    }}
     section[data-testid="stSidebar"] div[data-testid="stButton"] {{
         margin-top: 14px !important;
     }}
@@ -258,6 +259,7 @@ css_styling = f"""
         background-color: {thm['card_hover']} !important;
         border-color: {thm['banner_text']} !important;
     }}
+    
     h1, h2, h3, h4, h5, h6, p, span, label {{
         color: {thm['text_color']} !important;
         font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif !important;
@@ -422,7 +424,6 @@ def get_universe_tickers():
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     tickers_meta = []
     
-    # S&P 500
     try:
         r1 = requests.get("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies", headers=headers, timeout=8)
         t1 = pd.read_html(io.StringIO(r1.text))[0]
@@ -434,7 +435,6 @@ def get_universe_tickers():
     except Exception:
         pass
 
-    # S&P 400 MidCap
     try:
         r2 = requests.get("https://en.wikipedia.org/wiki/List_of_S%26P_400_companies", headers=headers, timeout=8)
         t2 = pd.read_html(io.StringIO(r2.text))[0]
@@ -497,8 +497,6 @@ def get_universe_tickers():
     return cleaned
 
 def load_or_update_universe():
-    """Checks if local SQLite DB is under 30 minutes old.
-       If fresh -> reads in 5ms. If stale -> performs chunked batch download with visible progress bar."""
     now = time.time()
     db_needs_sync = True
 
@@ -530,7 +528,6 @@ def load_or_update_universe():
     batch_size = 50
     records = []
 
-    # Dedicated slot for progress display
     progress_slot = st.empty()
 
     for i in range(0, total_symbols, batch_size):
@@ -544,17 +541,30 @@ def load_or_update_universe():
             st.markdown(f"<span style='font-size:11px; font-weight:700;'>DOWNLOADING & CACHING: {curr_done} / {total_symbols} STOCKS ({pct * 100:.1f}%)</span>", unsafe_allow_html=True)
 
         try:
-            raw_chunk = yf.download(chunk, period="6mo", group_by="ticker", threads=True, progress=False)
+            raw_chunk = yf.download(chunk, period="6mo", progress=False)
         except Exception:
             continue
 
+        if raw_chunk.empty:
+            continue
+
+        close_matrix = raw_chunk.get("Close", pd.DataFrame())
+        vol_matrix = raw_chunk.get("Volume", pd.DataFrame())
+
         for sym in chunk:
             try:
-                sub = raw_chunk[sym].dropna() if len(chunk) > 1 else raw_chunk.dropna()
-                if len(sub) < 22:
+                if len(chunk) > 1:
+                    if sym not in close_matrix.columns:
+                        continue
+                    close = close_matrix[sym].dropna()
+                    vol = vol_matrix[sym].dropna() if sym in vol_matrix.columns else pd.Series()
+                else:
+                    close = close_matrix.dropna()
+                    vol = vol_matrix.dropna()
+
+                if len(close) < 22:
                     continue
-                close = sub["Close"]
-                vol = sub["Volume"]
+
                 p_last = float(close.iloc[-1])
                 p_prev = float(close.iloc[-2])
                 chg_today = float((p_last - p_prev) / p_prev * 100)
@@ -601,7 +611,6 @@ def load_or_update_universe():
             except Exception:
                 continue
 
-    # Disappear completely
     progress_slot.empty()
 
     df_out = pd.DataFrame(records)
@@ -609,7 +618,6 @@ def load_or_update_universe():
         df_out.to_sql("constituents_1000", conn, if_exists="replace", index=False)
     return df_out
 
-# Optimization 1: RAM-Cache the SQLite DataFrame so widget interactions don't touch disk
 @st.cache_data(ttl=600)
 def get_cached_universe_df():
     return load_or_update_universe()
@@ -621,23 +629,32 @@ for sec, grp in UNIVERSE_DF.groupby("sector"):
     SECTOR_DATASETS[sec] = grp["ticker"].tolist()
 
 # ---------------------------------------------------------
-# TIER 2: OPTIMIZATION - DECOUPLE PRICES (FAST) & FUNDAMENTALS (CACHED)
+# TIER 2: CACHED FUNDAMENTALS & VECTORIZED LIVE PRICES
 # ---------------------------------------------------------
 @st.cache_data(ttl=1800)
 def fetch_fundamentals_cached(tickers):
-    """Caches fundamental ratios with a 30-min TTL so switching sectors avoids unneeded HTTP calls."""
+    """Caches fundamental ratios with a 30-min TTL using a controlled 5-worker pool."""
     if not tickers:
         return {}
     
     def fetch_fund_single(sym):
         try:
             s = yf.Ticker(sym)
+            mcap = None
+            try:
+                mcap = getattr(s.fast_info, "market_cap", None)
+            except Exception:
+                pass
+
             info = s.info or {}
+            if not mcap:
+                mcap = info.get("marketCap", None)
+
             div_y = info.get("dividendYield", None)
             if div_y:
                 div_y = div_y * 100 if div_y < 1.0 else div_y
             return sym, {
-                "market_cap": info.get("marketCap", None),
+                "market_cap": mcap,
                 "pe_ratio": info.get("trailingPE", None),
                 "fwd_pe": info.get("forwardPE", None),
                 "peg_ratio": info.get("pegRatio", None),
@@ -648,7 +665,7 @@ def fetch_fundamentals_cached(tickers):
             return sym, {}
 
     res = {}
-    with ThreadPoolExecutor(max_workers=min(20, len(tickers))) as executor:
+    with ThreadPoolExecutor(max_workers=min(5, len(tickers))) as executor:
         for sym, d in executor.map(fetch_fund_single, tickers):
             if d:
                 res[sym] = d
@@ -661,33 +678,41 @@ def fetch_live_active_quotes(tickers):
         return {}
     tickers = [t.strip().upper() for t in tickers]
 
-    # 1. Vectorized price batch (Fast ~0.5 - 1.0s)
     try:
-        hist_raw = yf.download(tickers, period="1mo", group_by="ticker", threads=True, progress=False)
+        hist_raw = yf.download(tickers, period="1mo", progress=False)
     except Exception:
         hist_raw = pd.DataFrame()
 
-    # 2. Get cached fundamentals without re-hitting Yahoo info endpoints every minute
     funds = fetch_fundamentals_cached(tuple(tickers))
+
+    close_df = hist_raw.get("Close", pd.DataFrame())
+    vol_df = hist_raw.get("Volume", pd.DataFrame())
 
     results = {}
     for sym in tickers:
         p_now, chg_dlr, chg_pct = 0.0, 0.0, 0.0
         vol = 0
         spark = []
-        if not hist_raw.empty:
+        if not close_df.empty:
             try:
-                sub = hist_raw[sym].dropna() if len(tickers) > 1 else hist_raw.dropna()
-                if len(sub) >= 2:
-                    c = sub["Close"]
-                    v = sub["Volume"]
-                    p_now = float(c.iloc[-1])
-                    p_prev = float(c.iloc[-2])
+                if len(tickers) > 1:
+                    if sym in close_df.columns:
+                        series = close_df[sym].dropna()
+                        v_series = vol_df[sym].dropna() if sym in vol_df.columns else pd.Series()
+                    else:
+                        series = pd.Series()
+                        v_series = pd.Series()
+                else:
+                    series = close_df.dropna()
+                    v_series = vol_df.dropna()
+
+                if len(series) >= 2:
+                    p_now = float(series.iloc[-1])
+                    p_prev = float(series.iloc[-2])
                     chg_dlr = float(p_now - p_prev)
                     chg_pct = float(chg_dlr / p_prev * 100) if p_prev > 0 else 0.0
-                    vol = int(v.iloc[-1]) if len(v) > 0 else 0
-                    hist_30 = c.iloc[-22:] if len(c) >= 22 else c
-                    spark = [float(p) for p in hist_30.tolist() if not pd.isna(p)]
+                    vol = int(v_series.iloc[-1]) if len(v_series) > 0 else 0
+                    spark = [float(p) for p in series.iloc[-22:].tolist()]
             except Exception:
                 pass
 
@@ -1029,7 +1054,7 @@ with tab_sector:
     for _, row in sector_sub_df.iterrows():
         t = row["ticker"]
         live = live_sec_data.get(t, {})
-        p_now = live.get("price", row["price"])
+        p_now = live.get("price") or row["price"]
         chg_d = live.get("change_dlr", 0.0)
         chg_p = live.get("change_pct", row["day_change"])
         mcap = live.get("market_cap", None)
@@ -1249,7 +1274,7 @@ with tab_scatter:
         cached_r = row_match.iloc[0] if not row_match.empty else None
         live = live_subset.get(t, {})
 
-        p_now = live.get("price", cached_r["price"] if cached_r is not None else 100.0)
+        p_now = live.get("price") or (cached_r["price"] if cached_r is not None else 100.0)
         chg_pct = live.get("change_pct", cached_r["day_change"] if cached_r is not None else 0.0)
         mcap = live.get("market_cap", 1e9)
         name = cached_r["name"] if cached_r is not None else t
@@ -1401,7 +1426,7 @@ with tab_rankings:
         cached_r = row_match.iloc[0] if not row_match.empty else None
         live = live_rank_data.get(t, {})
 
-        p_now = live.get("price", cached_r["price"] if cached_r is not None else 100.0)
+        p_now = live.get("price") or (cached_r["price"] if cached_r is not None else 100.0)
         gain_30 = cached_r["gain_30"] if cached_r is not None else 0.0
         rs_spy = cached_r["rs_spy"] if cached_r is not None else 0.0
         rvol = cached_r["rvol"] if cached_r is not None else 1.0
