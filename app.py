@@ -617,15 +617,31 @@ def fetch_fundamentals_cached(tickers):
             if not mcap:
                 mcap = info.get("marketCap", None)
 
+            # Fallback chains for valuation multiples
+            fwd_pe = info.get("forwardPE")
+            trail_pe = info.get("trailingPE")
+            
+            # If forward PE is missing or negative, fall back to trailing PE
+            effective_pe = fwd_pe if (fwd_pe and fwd_pe > 0) else (trail_pe if (trail_pe and trail_pe > 0) else None)
+
+            # Check both pegRatio and trailingPegRatio
+            peg = info.get("pegRatio") or info.get("trailingPegRatio")
+            
+            # Synthetic PEG fallback: if PEG is missing but earningsGrowth and PE exist
+            if not peg and effective_pe:
+                growth = info.get("earningsGrowth") or info.get("revenueGrowth")
+                if growth and growth > 0.02:
+                    peg = effective_pe / (growth * 100.0)
+
             div_y = info.get("dividendYield", None)
             if div_y:
                 div_y = div_y * 100 if div_y < 1.0 else div_y
                 
             return sym, {
                 "market_cap": mcap,
-                "pe_ratio": info.get("trailingPE", None),
-                "fwd_pe": info.get("forwardPE", None),
-                "peg_ratio": info.get("pegRatio", None),
+                "pe_ratio": trail_pe,
+                "fwd_pe": effective_pe,
+                "peg_ratio": peg if (peg and peg > 0) else None,
                 "beta": info.get("beta", None),
                 "div_yield": div_y,
                 "operating_margins": info.get("operatingMargins", None),
@@ -1477,9 +1493,15 @@ with tab_rankings:
             df_rank["rsi_target_dist"] = (df_rank["rsi"] - 55.0).abs()
             df_rank["r_rsi"] = df_rank["rsi_target_dist"].rank(ascending=True, method="min").astype(int)
 
-        # 4. Valuation Multiples: na_option="bottom" guarantees missing data gets the worst rank (N), not #1
-        df_rank["r_val"] = df_rank["fwd_pe"].rank(ascending=True, method="min", na_option="bottom").astype(int)
-        df_rank["r_peg"] = df_rank["peg"].rank(ascending=True, method="min", na_option="bottom").astype(int)
+        # Valuation Multiples: Fill missing values with the median of available stocks so they get a fair middle rank
+        pe_median = df_rank["fwd_pe"].dropna().median()
+        peg_median = df_rank["peg"].dropna().median()
+        
+        df_rank["fwd_pe_imputed"] = df_rank["fwd_pe"].fillna(pe_median if pd.notna(pe_median) else 25.0)
+        df_rank["peg_imputed"] = df_rank["peg"].fillna(peg_median if pd.notna(peg_median) else 1.5)
+
+        df_rank["r_val"] = df_rank["fwd_pe_imputed"].rank(ascending=True, method="min").astype(int)
+        df_rank["r_peg"] = df_rank["peg_imputed"].rank(ascending=True, method="min").astype(int)
 
         rank_cols = ["r_mom30", "r_mom90", "r_rvol", "r_rsi", "r_val", "r_peg"]
         df_rank["composite_score"] = df_rank[rank_cols].mean(axis=1)
