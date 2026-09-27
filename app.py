@@ -476,7 +476,6 @@ def load_or_update_universe():
         try:
             with sqlite3.connect(DB_FILE, timeout=15) as conn:
                 df = pd.read_sql("SELECT * FROM constituents_1000", conn)
-            # Ensure gain_90 exists in cached schema
             if not df.empty and "gain_90" in df.columns:
                 return df
         except Exception:
@@ -609,7 +608,12 @@ def fetch_fundamentals_cached(tickers):
             except Exception:
                 pass
 
-            info = s.info or {}
+            info = {}
+            try:
+                info = s.info or {}
+            except Exception:
+                pass
+
             if not mcap:
                 mcap = info.get("marketCap", None)
 
@@ -631,7 +635,7 @@ def fetch_fundamentals_cached(tickers):
             return sym, {}
 
     res = {}
-    with ThreadPoolExecutor(max_workers=min(5, len(tickers))) as executor:
+    with ThreadPoolExecutor(max_workers=min(8, len(tickers))) as executor:
         for sym, d in executor.map(fetch_fund_single, tickers):
             if d:
                 res[sym] = d
@@ -1344,7 +1348,7 @@ with tab_scatter:
         st.info("NO DATA AVAILABLE FOR SELECTED MATRIX.")
 
 # ---------------------------------------------------------
-# TAB 4: COMPOSITE FACTOR RANKING LEADERBOARD (REFACTORED)
+# TAB 4: COMPOSITE FACTOR RANKING LEADERBOARD
 # ---------------------------------------------------------
 with tab_rankings:
     st.markdown("<div class='section-banner'>MULTI-FACTOR COMPOSITE LEADERBOARD // QUANTITATIVE FACTOR SCORING</div>", unsafe_allow_html=True)
@@ -1388,7 +1392,6 @@ with tab_rankings:
             key="rank_custom_txt"
         )
 
-    # Fundamental Quality Filter Gate
     c_gate1, c_gate2 = st.columns([1.5, 3])
     with c_gate1:
         enable_quality_filter = st.checkbox("Enforce Quality Gate (Positive Operating Margin & ROE)", value=False)
@@ -1420,18 +1423,21 @@ with tab_rankings:
         op_margin = live.get("operating_margins", None)
         roe = live.get("roe", None)
 
-        # Quality Gate Filter
         if enable_quality_filter:
             if op_margin is not None and op_margin <= 0:
                 continue
             if roe is not None and roe <= 0:
                 continue
 
-        # Signed RVOL: Heavy accumulation days > 1.0; heavy distribution days inverted < 1.0
+        # Signed RVOL: Rewards high-volume accumulation days, penalizes heavy distribution down-days
         if chg_today >= 0:
             signed_rvol = rvol
         else:
             signed_rvol = 1.0 / rvol if rvol > 0 else 0.1
+
+        # Keep pure numeric or NaN for proper pandas ordinal ranking
+        fwd_val = float(fwd_pe) if (fwd_pe is not None and not pd.isna(fwd_pe) and fwd_pe > 0) else np.nan
+        peg_val = float(peg) if (peg is not None and not pd.isna(peg) and peg > 0) else np.nan
 
         rank_raw.append({
             "ticker": t,
@@ -1443,10 +1449,10 @@ with tab_rankings:
             "rvol": rvol,
             "signed_rvol": signed_rvol,
             "rsi": rsi,
-            "fwd_pe": fwd_pe if (fwd_pe and fwd_pe > 0) else 9999.0,
-            "fwd_pe_disp": f"{fwd_pe:.1f}" if (fwd_pe and 0 < fwd_pe < 9000) else "--",
-            "peg": peg if (peg and peg > 0) else 999.0,
-            "peg_disp": f"{peg:.2f}" if (peg and 0 < peg < 900) else "--",
+            "fwd_pe": fwd_val,
+            "fwd_pe_disp": f"{fwd_val:.1f}" if pd.notna(fwd_val) else "--",
+            "peg": peg_val,
+            "peg_disp": f"{peg_val:.2f}" if pd.notna(peg_val) else "--",
             "mcap_fmt": fmt_mcap(mcap),
             "sparkline": live.get("sparkline", [])
         })
@@ -1454,7 +1460,7 @@ with tab_rankings:
     if rank_raw:
         df_rank = pd.DataFrame(rank_raw)
         
-        # 1. Momentum ranks (30D & 90D decoupled)
+        # 1. Momentum ranks
         df_rank["r_mom30"] = df_rank["gain_30"].rank(ascending=False, method="min").astype(int)
         df_rank["r_mom90"] = df_rank["gain_90"].rank(ascending=False, method="min").astype(int)
         
@@ -1463,19 +1469,17 @@ with tab_rankings:
         
         # 3. Strategy Mode-Aligned RSI Rank
         if strategy_mode == "Trend & Velocity Breakout":
-            # Higher RSI is rewarded, confirming strong momentum
             df_rank["r_rsi"] = df_rank["rsi"].rank(ascending=False, method="min").astype(int)
         elif strategy_mode == "Oversold Pullback & Reset":
-            # Lower RSI is rewarded, favoring oversold bottoms
             df_rank["r_rsi"] = df_rank["rsi"].rank(ascending=True, method="min").astype(int)
         else:
-            # Balanced Quality: Target ideal RSI sweet spot (approx 55 RSI), penalizing extreme blow-offs (>70) and washouts (<35)
+            # Balanced Quality: Distance from ~55 RSI sweet spot
             df_rank["rsi_target_dist"] = (df_rank["rsi"] - 55.0).abs()
             df_rank["r_rsi"] = df_rank["rsi_target_dist"].rank(ascending=True, method="min").astype(int)
 
-        # 4. Valuation multiples (lowest forward P/E and PEG get rank 1)
-        df_rank["r_val"] = df_rank["fwd_pe"].rank(ascending=True, method="min").astype(int)
-        df_rank["r_peg"] = df_rank["peg"].rank(ascending=True, method="min").astype(int)
+        # 4. Valuation Multiples: na_option="bottom" guarantees missing data gets the worst rank (N), not #1
+        df_rank["r_val"] = df_rank["fwd_pe"].rank(ascending=True, method="min", na_option="bottom").astype(int)
+        df_rank["r_peg"] = df_rank["peg"].rank(ascending=True, method="min", na_option="bottom").astype(int)
 
         rank_cols = ["r_mom30", "r_mom90", "r_rvol", "r_rsi", "r_val", "r_peg"]
         df_rank["composite_score"] = df_rank[rank_cols].mean(axis=1)
