@@ -617,17 +617,26 @@ def fetch_fundamentals_cached(tickers):
             if not mcap:
                 mcap = info.get("marketCap", None)
 
-            # Fallback chains for valuation multiples
+            # 1. Primary forward P/E lookup
             fwd_pe = info.get("forwardPE")
             trail_pe = info.get("trailingPE")
             
-            # If forward PE is missing or negative, fall back to trailing PE
+            # 2. Synthetic Forward P/E fallback: Price / Forward EPS
+            if not fwd_pe or fwd_pe <= 0:
+                fwd_eps = info.get("forwardEps")
+                curr_price = (
+                    getattr(s.fast_info, "last_price", None)
+                    or info.get("currentPrice")
+                    or info.get("regularMarketPrice")
+                )
+                if curr_price and fwd_eps and fwd_eps > 0:
+                    fwd_pe = curr_price / fwd_eps
+
+            # 3. Fallback to trailing P/E if forward is still unavailable
             effective_pe = fwd_pe if (fwd_pe and fwd_pe > 0) else (trail_pe if (trail_pe and trail_pe > 0) else None)
 
-            # Check both pegRatio and trailingPegRatio
+            # PEG Ratio lookup & synthetic fallback
             peg = info.get("pegRatio") or info.get("trailingPegRatio")
-            
-            # Synthetic PEG fallback: if PEG is missing but earningsGrowth and PE exist
             if not peg and effective_pe:
                 growth = info.get("earningsGrowth") or info.get("revenueGrowth")
                 if growth and growth > 0.02:
