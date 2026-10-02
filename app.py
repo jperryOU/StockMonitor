@@ -188,7 +188,7 @@ def render_html(html_code):
         st.markdown(clean, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# DYNAMIC THEMED CSS
+# DYNAMIC THEMED CSS (NO EMOJIS, ZERO RADIUS)
 # ---------------------------------------------------------
 css_styling = f"""
 <style>
@@ -208,6 +208,8 @@ css_styling = f"""
         background-color: {thm['sidebar_bg']} !important;
         border-right: 1px solid {thm['sidebar_border']} !important;
     }}
+    
+    /* UNIVERSAL SELECTBOX FIX FOR SIDEBAR & MAIN BODY */
     div[data-baseweb="select"],
     div[data-baseweb="select"] > div,
     div[data-baseweb="select"] div,
@@ -235,6 +237,7 @@ css_styling = f"""
         background-color: {thm['card_hover']} !important;
         color: {thm['banner_text']} !important;
     }}
+    
     section[data-testid="stSidebar"] label {{
         color: {thm['text_color']} !important;
     }}
@@ -256,6 +259,7 @@ css_styling = f"""
         background-color: {thm['card_hover']} !important;
         border-color: {thm['banner_text']} !important;
     }}
+    
     h1, h2, h3, h4, h5, h6, p, span, label {{
         color: {thm['text_color']} !important;
         font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif !important;
@@ -367,10 +371,15 @@ css_styling = f"""
         color: {thm['text_color']} !important;
         white-space: pre-line !important;
         white-space: pre-wrap !important;
+        word-break: normal !important;
+        text-overflow: clip !important;
+        overflow: visible !important;
         font-size: 9.5px !important;
         font-weight: 700 !important;
         line-height: 1.2 !important;
         text-align: center !important;
+        margin: 0 !important;
+        padding: 0 !important;
     }}
     .stTabs [data-baseweb="tab"] {{
         border-radius: 0px !important;
@@ -411,6 +420,7 @@ render_html(css_styling)
 # ---------------------------------------------------------
 @st.cache_data(ttl=86400)
 def get_universe_tickers():
+    """Scrapes S&P 500 + S&P 400 MidCap constituents for top ~900-1000 US equities."""
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     tickers_meta = []
     
@@ -442,16 +452,42 @@ def get_universe_tickers():
             ("MSFT", "Information Technology", "Microsoft Corporation"),
             ("NVDA", "Information Technology", "NVIDIA Corporation"),
             ("AVGO", "Information Technology", "Broadcom Inc."),
+            ("ORCL", "Information Technology", "Oracle Corporation"),
+            ("CRM", "Information Technology", "Salesforce Inc."),
+            ("AMD", "Information Technology", "Advanced Micro Devices"),
+            ("QCOM", "Information Technology", "QUALCOMM Inc."),
+            ("MU", "Information Technology", "Micron Technology"),
+            ("HPE", "Information Technology", "Hewlett Packard Enterprise"),
+            ("DELL", "Information Technology", "Dell Technologies"),
             ("JPM", "Financials", "JPMorgan Chase & Co."),
+            ("V", "Financials", "Visa Inc."),
+            ("MA", "Financials", "Mastercard Inc."),
+            ("BAC", "Financials", "Bank of America Corp."),
             ("LLY", "Health Care", "Eli Lilly and Company"),
+            ("UNH", "Health Care", "UnitedHealth Group Inc."),
+            ("JNJ", "Health Care", "Johnson & Johnson"),
+            ("ABBV", "Health Care", "AbbVie Inc."),
             ("AMZN", "Consumer Discretionary", "Amazon.com Inc."),
+            ("TSLA", "Consumer Discretionary", "Tesla Inc."),
+            ("HD", "Consumer Discretionary", "Home Depot Inc."),
+            ("GOOGL", "Communication Services", "Alphabet Inc."),
             ("META", "Communication Services", "Meta Platforms Inc."),
+            ("NFLX", "Communication Services", "Netflix Inc."),
+            ("GE", "Industrials", "General Electric"),
             ("CAT", "Industrials", "Caterpillar Inc."),
+            ("RTX", "Industrials", "RTX Corporation"),
             ("XOM", "Energy", "Exxon Mobil Corporation"),
+            ("CVX", "Energy", "Chevron Corporation"),
+            ("COP", "Energy", "ConocoPhillips"),
             ("WMT", "Consumer Staples", "Walmart Inc."),
+            ("PG", "Consumer Staples", "Procter & Gamble"),
+            ("COST", "Consumer Staples", "Costco Wholesale Corp."),
             ("LIN", "Materials", "Linde plc"),
+            ("SHW", "Materials", "Sherwin-Williams"),
             ("PLD", "Real Estate", "Prologis Inc."),
-            ("NEE", "Utilities", "NextEra Energy Inc.")
+            ("AMT", "Real Estate", "American Tower Corp."),
+            ("NEE", "Utilities", "NextEra Energy Inc."),
+            ("SO", "Utilities", "Southern Company")
         ]
         tickers_meta = [{"ticker": t[0], "sector": t[1], "name": t[2]} for t in base_fallback]
 
@@ -476,7 +512,7 @@ def load_or_update_universe():
         try:
             with sqlite3.connect(DB_FILE, timeout=15) as conn:
                 df = pd.read_sql("SELECT * FROM constituents_1000", conn)
-            if not df.empty and "gain_90" in df.columns:
+            if not df.empty:
                 return df
         except Exception:
             pass
@@ -486,8 +522,15 @@ def load_or_update_universe():
     meta_lookup = {m["ticker"]: m for m in universe_meta}
     total_symbols = len(all_symbols)
 
+    try:
+        spy_c = yf.download("SPY", period="6mo", progress=False)["Close"].dropna()
+        spy_30d = float((spy_c.iloc[-1] - spy_c.iloc[-22]) / spy_c.iloc[-22] * 100)
+    except Exception:
+        spy_30d = 0.0
+
     batch_size = 50
     records = []
+
     progress_slot = st.empty()
 
     for i in range(0, total_symbols, batch_size):
@@ -529,10 +572,7 @@ def load_or_update_universe():
                 p_prev = float(close.iloc[-2])
                 chg_today = float((p_last - p_prev) / p_prev * 100)
                 gain_30 = float((p_last - close.iloc[-22]) / close.iloc[-22] * 100)
-                
-                # Intermediate momentum (approx 3-month/63 trading days)
-                lookback_90 = min(63, len(close) - 1)
-                gain_90 = float((p_last - close.iloc[-lookback_90]) / close.iloc[-lookback_90] * 100)
+                rs_alpha = round(gain_30 - spy_30d, 2)
 
                 if len(close) >= 50:
                     sma_50 = float(close.rolling(50).mean().iloc[-1])
@@ -564,7 +604,7 @@ def load_or_update_universe():
                     "price": round(p_last, 2),
                     "day_change": round(chg_today, 2),
                     "gain_30": round(gain_30, 2),
-                    "gain_90": round(gain_90, 2),
+                    "rs_spy": rs_alpha,
                     "sma_50_dist": sma_50_dist,
                     "rvol": rvol,
                     "rsi": rsi,
@@ -596,6 +636,7 @@ for sec, grp in UNIVERSE_DF.groupby("sector"):
 # ---------------------------------------------------------
 @st.cache_data(ttl=1800)
 def fetch_fundamentals_cached(tickers):
+    """Caches fundamental ratios with a 30-min TTL using mathematical EPS fallback for Forward P/E."""
     if not tickers:
         return {}
     
@@ -608,59 +649,49 @@ def fetch_fundamentals_cached(tickers):
             except Exception:
                 pass
 
-            info = {}
-            try:
-                info = s.info or {}
-            except Exception:
-                pass
-
+            info = s.info or {}
             if not mcap:
                 mcap = info.get("marketCap", None)
 
-            # 1. Primary forward P/E lookup
-            fwd_pe = info.get("forwardPE")
-            trail_pe = info.get("trailingPE")
-            
-            # 2. Synthetic Forward P/E fallback: Price / Forward EPS
-            if not fwd_pe or fwd_pe <= 0:
+            # Robust Forward P/E with mathematical EPS fallback
+            fwd_pe = info.get("forwardPE") or info.get("forwardPe")
+            if not fwd_pe or pd.isna(fwd_pe) or float(fwd_pe) <= 0:
                 fwd_eps = info.get("forwardEps")
-                curr_price = (
-                    getattr(s.fast_info, "last_price", None)
-                    or info.get("currentPrice")
-                    or info.get("regularMarketPrice")
-                )
-                if curr_price and fwd_eps and fwd_eps > 0:
-                    fwd_pe = curr_price / fwd_eps
+                p_now = getattr(s.fast_info, "last_price", None) or info.get("currentPrice") or info.get("regularMarketPrice")
+                if fwd_eps and p_now and float(fwd_eps) > 0:
+                    fwd_pe = round(float(p_now) / float(fwd_eps), 2)
+                else:
+                    trail = info.get("trailingPE")
+                    fwd_pe = float(trail) if trail and float(trail) > 0 else None
+            else:
+                fwd_pe = float(fwd_pe)
 
-            # 3. Fallback to trailing P/E if forward is still unavailable
-            effective_pe = fwd_pe if (fwd_pe and fwd_pe > 0) else (trail_pe if (trail_pe and trail_pe > 0) else None)
-
-            # PEG Ratio lookup & synthetic fallback
-            peg = info.get("pegRatio") or info.get("trailingPegRatio")
-            if not peg and effective_pe:
-                growth = info.get("earningsGrowth") or info.get("revenueGrowth")
-                if growth and growth > 0.02:
-                    peg = effective_pe / (growth * 100.0)
+            peg = info.get("pegRatio", None)
+            if peg is not None:
+                try:
+                    peg = float(peg)
+                    if peg <= 0: peg = None
+                except Exception:
+                    peg = None
 
             div_y = info.get("dividendYield", None)
             if div_y:
-                div_y = div_y * 100 if div_y < 1.0 else div_y
-                
+                div_y = float(div_y) * 100 if float(div_y) < 1.0 else float(div_y)
+
             return sym, {
                 "market_cap": mcap,
-                "pe_ratio": trail_pe,
-                "fwd_pe": effective_pe,
-                "peg_ratio": peg if (peg and peg > 0) else None,
+                "pe_ratio": info.get("trailingPE", None),
+                "fwd_pe": fwd_pe,
+                "forward_pe": fwd_pe,
+                "peg_ratio": peg,
                 "beta": info.get("beta", None),
-                "div_yield": div_y,
-                "operating_margins": info.get("operatingMargins", None),
-                "roe": info.get("returnOnEquity", None)
+                "div_yield": div_y
             }
         except Exception:
             return sym, {}
 
     res = {}
-    with ThreadPoolExecutor(max_workers=min(8, len(tickers))) as executor:
+    with ThreadPoolExecutor(max_workers=min(5, len(tickers))) as executor:
         for sym, d in executor.map(fetch_fund_single, tickers):
             if d:
                 res[sym] = d
@@ -668,6 +699,7 @@ def fetch_fundamentals_cached(tickers):
 
 @st.cache_data(ttl=60)
 def fetch_live_active_quotes(tickers):
+    """Fetches real-time price & volume via 1 vectorized batch call, merging with cached fundamentals."""
     if not tickers:
         return {}
     tickers = [t.strip().upper() for t in tickers]
@@ -692,10 +724,10 @@ def fetch_live_active_quotes(tickers):
                 if len(tickers) > 1:
                     if sym in close_df.columns:
                         series = close_df[sym].dropna()
-                        v_series = vol_df[sym].dropna() if sym in vol_df.columns else pd.Series()
+                        v_series = vol_df[sym].dropna() if sym in vol_df.columns else pd.Series(dtype=float)
                     else:
-                        series = pd.Series()
-                        v_series = pd.Series()
+                        series = pd.Series(dtype=float)
+                        v_series = pd.Series(dtype=float)
                 else:
                     series = close_df.dropna()
                     v_series = vol_df.dropna()
@@ -719,11 +751,10 @@ def fetch_live_active_quotes(tickers):
             "market_cap": f.get("market_cap"),
             "pe_ratio": f.get("pe_ratio"),
             "fwd_pe": f.get("fwd_pe"),
+            "forward_pe": f.get("fwd_pe"),
             "peg_ratio": f.get("peg_ratio"),
             "beta": f.get("beta"),
             "div_yield": f.get("div_yield"),
-            "operating_margins": f.get("operating_margins"),
-            "roe": f.get("roe"),
             "sparkline": spark
         }
     return results
@@ -1024,7 +1055,7 @@ with tab_portfolio:
         st.info("NO PORTFOLIO POSITIONS AVAILABLE.")
 
 # ---------------------------------------------------------
-# TAB 2: SECTOR EXPLORER
+# TAB 2: SECTOR EXPLORER (INSTANT SECTOR SWITCHING)
 # ---------------------------------------------------------
 with tab_sector:
     col_sel, col_tgl_f, col_tgl_t = st.columns([1.5, 1, 1.2])
@@ -1040,7 +1071,7 @@ with tab_sector:
         
     with col_tgl_t:
         st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
-        show_technicals = st.toggle("Advanced Technicals (14D RSI, 50D Spread, RVOL, 90D Mom)", value=False)
+        show_technicals = st.toggle("Advanced Technicals (14D RSI, 50D Spread, RVOL, RS vs SPY)", value=False)
 
     sector_sub_df = UNIVERSE_DF[UNIVERSE_DF["sector"] == selected_sector].head(25)
     sector_tickers = sector_sub_df["ticker"].tolist()
@@ -1068,7 +1099,6 @@ with tab_sector:
             "chg_dlr": chg_d,
             "chg_pct": chg_p,
             "gain_30": row["gain_30"],
-            "gain_90": row.get("gain_90", row["gain_30"]),
             "mcap": mcap,
             "mcap_fmt": fmt_mcap(mcap),
             "pe": f"{pe:.1f}" if pe else "--",
@@ -1079,6 +1109,7 @@ with tab_sector:
             "rsi": row["rsi"],
             "sma_50_dist": row["sma_50_dist"],
             "rvol": row["rvol"],
+            "rs_spy": row["rs_spy"],
             "bullish": bool(row["bullish"] == 1),
             "sparkline": spark
         })
@@ -1091,7 +1122,7 @@ with tab_sector:
             if show_fundamentals:
                 html += '<th>FWD P/E</th><th>PEG</th><th>BETA</th><th>DIV %</th>'
             if show_technicals:
-                html += '<th>14D RSI</th><th>50D SPREAD</th><th>RVOL</th><th>90D MOM</th>'
+                html += '<th>14D RSI</th><th>50D SPREAD</th><th>RVOL</th><th>RS vs SPY</th>'
             return html
 
         def build_extra_td(r):
@@ -1109,10 +1140,10 @@ with tab_sector:
                     c_50, v_50 = "", "--"
                 rvol_val = f'{r["rvol"]:.2f}x' if r["rvol"] is not None else '--'
                 c_rvol = 'pos-cell' if (r["rvol"] and r["rvol"] >= 1.5) else ''
-                c_90 = "pos-cell" if r["gain_90"] >= 0 else "neg-cell"
-                s_90 = "+" if r["gain_90"] >= 0 else ""
-                v_90 = f'{s_90}{r["gain_90"]:.1f}%'
-                html += f'<td class="{c_rsi}">{rsi_val}</td><td class="{c_50}">{v_50}</td><td class="{c_rvol}">{rvol_val}</td><td class="{c_90}">{v_90}</td>'
+                c_rs = "pos-cell" if r["rs_spy"] >= 0 else "neg-cell"
+                s_rs = "+" if r["rs_spy"] >= 0 else ""
+                v_rs = f'{s_rs}{r["rs_spy"]:.1f}%'
+                html += f'<td class="{c_rsi}">{rsi_val}</td><td class="{c_50}">{v_50}</td><td class="{c_rvol}">{rvol_val}</td><td class="{c_rs}">{v_rs}</td>'
             return html
 
         with col_l:
@@ -1155,7 +1186,7 @@ with tab_sector:
 METRIC_REGISTRY = {
     "Daily Gain (%) (Today's percentage price change)": "Daily Gain (%)",
     "30D Gain (%) (Trailing 22-session momentum return)": "30D Gain (%)",
-    "90D Gain (%) (Trailing 63-session intermediate return)": "90D Gain (%)",
+    "RS vs SPY Alpha (%) (Compares stock return directly against SPY)": "RS vs SPY Alpha (%)",
     "14D RSI (Momentum oscillator: >70 overbought, <30 oversold)": "14D RSI",
     "50D SMA Spread (%) (% distance above/below 50-day moving average)": "50D SMA Spread (%)",
     "RVOL (Today's volume vs 20-day average; >1.5x is heavy)": "RVOL (Volume Multiplier)",
@@ -1202,7 +1233,7 @@ with tab_scatter:
 
     x_opts = [
         "30D Gain (%) (Trailing 22-session momentum return)",
-        "90D Gain (%) (Trailing 63-session intermediate return)",
+        "RS vs SPY Alpha (%) (Compares stock return directly against SPY)",
         "50D SMA Spread (%) (% distance above/below 50-day moving average)",
         "14D RSI (Momentum oscillator: >70 overbought, <30 oversold)"
     ]
@@ -1222,7 +1253,7 @@ with tab_scatter:
 
     color_opts = [
         "Daily Gain (%) (Today's percentage price change)",
-        "90D Gain (%) (Trailing 63-session intermediate return)",
+        "RS vs SPY Alpha (%) (Compares stock return directly against SPY)",
         "14D RSI (Momentum oscillator: >70 overbought, <30 oversold)",
         "50D SMA Spread (%) (% distance above/below 50-day moving average)",
         "RVOL (Today's volume vs 20-day average; >1.5x is heavy)",
@@ -1279,11 +1310,11 @@ with tab_scatter:
             "Ticker": t,
             "Name": name,
             "30D Gain (%)": cached_r["gain_30"] if cached_r is not None else 0.0,
-            "90D Gain (%)": cached_r.get("gain_90", 0.0) if cached_r is not None else 0.0,
             "Daily Gain (%)": round(chg_pct, 2),
             "14D RSI": cached_r["rsi"] if cached_r is not None else 50.0,
             "50D SMA Spread (%)": cached_r["sma_50_dist"] if cached_r is not None else 0.0,
             "RVOL (Volume Multiplier)": cached_r["rvol"] if cached_r is not None else 1.0,
+            "RS vs SPY Alpha (%)": cached_r["rs_spy"] if cached_r is not None else 0.0,
             "Trailing P/E": round(live["pe_ratio"], 1) if live.get("pe_ratio") else None,
             "Forward P/E": round(live["fwd_pe"], 1) if live.get("fwd_pe") else None,
             "PEG Ratio": round(live["peg_ratio"], 2) if live.get("peg_ratio") else None,
@@ -1297,7 +1328,7 @@ with tab_scatter:
     if plot_rows:
         df_plot = pd.DataFrame(plot_rows)
 
-        if color_col in ["Daily Gain (%)", "50D SMA Spread (%)", "90D Gain (%)", "30D Gain (%)"]:
+        if color_col in ["Daily Gain (%)", "50D SMA Spread (%)", "RS vs SPY Alpha (%)"]:
             color_scale = [thm["spark_neg"], "#64748B", thm["spark_pos"]]
             c_mid = 0.0
         elif color_col == "14D RSI":
@@ -1325,10 +1356,10 @@ with tab_scatter:
                 "Ticker": False,
                 "Price": True,
                 "30D Gain (%)": ":.2f",
-                "90D Gain (%)": ":.2f",
                 "Daily Gain (%)": ":.2f",
                 "14D RSI": True,
                 "50D SMA Spread (%)": True,
+                "RS vs SPY Alpha (%)": True,
                 "Trailing P/E": True,
                 "Forward P/E": True,
                 "PEG Ratio": True,
@@ -1373,19 +1404,20 @@ with tab_scatter:
         st.info("NO DATA AVAILABLE FOR SELECTED MATRIX.")
 
 # ---------------------------------------------------------
-# TAB 4: COMPOSITE FACTOR RANKING LEADERBOARD
+# TAB 4: COMPOSITE FACTOR RANKING LEADERBOARD (INVERTED RSI)
 # ---------------------------------------------------------
 with tab_rankings:
     st.markdown("<div class='section-banner'>MULTI-FACTOR COMPOSITE LEADERBOARD // QUANTITATIVE FACTOR SCORING</div>", unsafe_allow_html=True)
     st.markdown(
         f"<p style='font-size:11.5px; color:{thm['card_border']}; margin-top:4px; margin-bottom:12px;'>"
-        f"Constituents are ranked 1 to N across 6 metrics (30D Momentum, 90D Momentum, Directional Signed RVOL, Strategy-Aligned RSI, Forward P/E, PEG Ratio). "
-        f"<b>Lowest Composite Score = #1 Top Profile</b>."
+        f"Each constituent is ranked from 1 to N across 6 metrics (30D Momentum, RS vs SPY Alpha, RVOL, 14D RSI, Forward P/E, PEG Ratio). "
+        f"<b>Lowest Average Score = #1 Ranked Stock</b> (Rank 1.0 is the best possible score). "
+        f"<i>RSI is ranked ascending so cooler, oversold reset entries (lower numbers) receive top ranks. Unprofitable/missing valuations are placed at the bottom.</i>"
         f"</p>",
         unsafe_allow_html=True
     )
 
-    rk_col1, rk_col2, rk_col3, rk_col4 = st.columns([1.4, 1.2, 1.0, 1.2])
+    rk_col1, rk_col2, rk_col3 = st.columns([1.5, 1.2, 1.2])
     with rk_col1:
         rank_sector = st.selectbox(
             "SELECT SECTOR FOR RANKINGS",
@@ -1394,32 +1426,18 @@ with tab_rankings:
             key="rank_sector_sel"
         )
     with rk_col2:
-        strategy_mode = st.selectbox(
-            "STRATEGY FACTOR PROFILE",
-            [
-                "Balanced Quality Momentum (Default)",
-                "Trend & Velocity Breakout",
-                "Oversold Pullback & Reset"
-            ],
-            index=0
-        )
-    with rk_col3:
         rank_stock_count = st.select_slider(
             "STOCKS TO EVALUATE",
             options=[10, 20, 30, 40, 50],
             value=40,
             key="rank_count_slider"
         )
-    with rk_col4:
+    with rk_col3:
         rank_custom_input = st.text_input(
             "ADD CUSTOM TICKERS TO POOL",
             placeholder="e.g. PLTR, SMCI, TSM",
             key="rank_custom_txt"
         )
-
-    c_gate1, c_gate2 = st.columns([1.5, 3])
-    with c_gate1:
-        enable_quality_filter = st.checkbox("Enforce Quality Gate (Positive Operating Margin & ROE)", value=False)
 
     base_rank_df = UNIVERSE_DF[UNIVERSE_DF["sector"] == rank_sector].head(int(rank_stock_count))
     eval_tickers = base_rank_df["ticker"].tolist()
@@ -1436,48 +1454,42 @@ with tab_rankings:
         live = live_rank_data.get(t, {})
 
         p_now = live.get("price") or (cached_r["price"] if cached_r is not None else 100.0)
-        chg_today = live.get("change_pct", cached_r["day_change"] if cached_r is not None else 0.0)
         gain_30 = cached_r["gain_30"] if cached_r is not None else 0.0
-        gain_90 = cached_r.get("gain_90", gain_30) if cached_r is not None else gain_30
+        rs_spy = cached_r["rs_spy"] if cached_r is not None else 0.0
         rvol = cached_r["rvol"] if cached_r is not None else 1.0
         rsi = cached_r["rsi"] if cached_r is not None else 50.0
-        
-        fwd_pe = live.get("fwd_pe", None)
-        peg = live.get("peg_ratio", None)
-        mcap = live.get("market_cap", None)
-        op_margin = live.get("operating_margins", None)
-        roe = live.get("roe", None)
 
-        if enable_quality_filter:
-            if op_margin is not None and op_margin <= 0:
-                continue
-            if roe is not None and roe <= 0:
-                continue
-
-        # Signed RVOL: Rewards high-volume accumulation days, penalizes heavy distribution down-days
-        if chg_today >= 0:
-            signed_rvol = rvol
+        # Robust forward P/E and PEG extraction
+        fwd_pe_raw = live.get("fwd_pe") or live.get("forward_pe")
+        if fwd_pe_raw is not None and not pd.isna(fwd_pe_raw) and float(fwd_pe_raw) > 0:
+            fwd_pe_num = float(fwd_pe_raw)
+            fwd_pe_disp = f"{fwd_pe_num:.1f}"
         else:
-            signed_rvol = 1.0 / rvol if rvol > 0 else 0.1
+            fwd_pe_num = np.nan
+            fwd_pe_disp = "--"
 
-        # Keep pure numeric or NaN for proper pandas ordinal ranking
-        fwd_val = float(fwd_pe) if (fwd_pe is not None and not pd.isna(fwd_pe) and fwd_pe > 0) else np.nan
-        peg_val = float(peg) if (peg is not None and not pd.isna(peg) and peg > 0) else np.nan
+        peg_raw = live.get("peg_ratio")
+        if peg_raw is not None and not pd.isna(peg_raw) and float(peg_raw) > 0:
+            peg_num = float(peg_raw)
+            peg_disp = f"{peg_num:.2f}"
+        else:
+            peg_num = np.nan
+            peg_disp = "--"
+
+        mcap = live.get("market_cap", None)
 
         rank_raw.append({
             "ticker": t,
             "name": cached_r["name"] if cached_r is not None else t,
             "price": p_now,
-            "day_change": chg_today,
             "gain_30": gain_30,
-            "gain_90": gain_90,
+            "rs_spy": rs_spy,
             "rvol": rvol,
-            "signed_rvol": signed_rvol,
             "rsi": rsi,
-            "fwd_pe": fwd_val,
-            "fwd_pe_disp": f"{fwd_val:.1f}" if pd.notna(fwd_val) else "--",
-            "peg": peg_val,
-            "peg_disp": f"{peg_val:.2f}" if pd.notna(peg_val) else "--",
+            "fwd_pe": fwd_pe_num,
+            "fwd_pe_disp": fwd_pe_disp,
+            "peg": peg_num,
+            "peg_disp": peg_disp,
             "mcap_fmt": fmt_mcap(mcap),
             "sparkline": live.get("sparkline", [])
         })
@@ -1485,34 +1497,19 @@ with tab_rankings:
     if rank_raw:
         df_rank = pd.DataFrame(rank_raw)
         
-        # 1. Momentum ranks
-        df_rank["r_mom30"] = df_rank["gain_30"].rank(ascending=False, method="min").astype(int)
-        df_rank["r_mom90"] = df_rank["gain_90"].rank(ascending=False, method="min").astype(int)
+        # 1 = best
+        df_rank["r_mom"] = df_rank["gain_30"].rank(ascending=False, method="min").astype(int)
+        df_rank["r_alpha"] = df_rank["rs_spy"].rank(ascending=False, method="min").astype(int)
+        df_rank["r_rvol"] = df_rank["rvol"].rank(ascending=False, method="min").astype(int)
         
-        # 2. Signed RVOL (Directional Accumulation)
-        df_rank["r_rvol"] = df_rank["signed_rvol"].rank(ascending=False, method="min").astype(int)
+        # Inverted RSI: cooler/lower RSI = rank 1 (Best)
+        df_rank["r_rsi"] = df_rank["rsi"].rank(ascending=True, method="min").astype(int)
         
-        # 3. Strategy Mode-Aligned RSI Rank
-        if strategy_mode == "Trend & Velocity Breakout":
-            df_rank["r_rsi"] = df_rank["rsi"].rank(ascending=False, method="min").astype(int)
-        elif strategy_mode == "Oversold Pullback & Reset":
-            df_rank["r_rsi"] = df_rank["rsi"].rank(ascending=True, method="min").astype(int)
-        else:
-            # Balanced Quality: Distance from ~55 RSI sweet spot
-            df_rank["rsi_target_dist"] = (df_rank["rsi"] - 55.0).abs()
-            df_rank["r_rsi"] = df_rank["rsi_target_dist"].rank(ascending=True, method="min").astype(int)
+        # Valuation ranks: lowest positive multiple = 1; NaN/unprofitable = ranked last (na_option="bottom")
+        df_rank["r_val"] = df_rank["fwd_pe"].rank(ascending=True, method="min", na_option="bottom").astype(int)
+        df_rank["r_peg"] = df_rank["peg"].rank(ascending=True, method="min", na_option="bottom").astype(int)
 
-        # Valuation Multiples: Fill missing values with the median of available stocks so they get a fair middle rank
-        pe_median = df_rank["fwd_pe"].dropna().median()
-        peg_median = df_rank["peg"].dropna().median()
-        
-        df_rank["fwd_pe_imputed"] = df_rank["fwd_pe"].fillna(pe_median if pd.notna(pe_median) else 25.0)
-        df_rank["peg_imputed"] = df_rank["peg"].fillna(peg_median if pd.notna(peg_median) else 1.5)
-
-        df_rank["r_val"] = df_rank["fwd_pe_imputed"].rank(ascending=True, method="min").astype(int)
-        df_rank["r_peg"] = df_rank["peg_imputed"].rank(ascending=True, method="min").astype(int)
-
-        rank_cols = ["r_mom30", "r_mom90", "r_rvol", "r_rsi", "r_val", "r_peg"]
+        rank_cols = ["r_mom", "r_alpha", "r_rvol", "r_rsi", "r_val", "r_peg"]
         df_rank["composite_score"] = df_rank[rank_cols].mean(axis=1)
         df_rank = df_rank.sort_values(by="composite_score", ascending=True).reset_index(drop=True)
         df_rank["final_rank"] = df_rank.index + 1
@@ -1524,7 +1521,7 @@ with tab_rankings:
                 st.metric(
                     label=f"RANK #{leader['final_rank']} LEADER // {leader['ticker']}",
                     value=f"Score: {leader['composite_score']:.1f}",
-                    delta=f"{leader['gain_30']:+.1f}% 30D | 90D: {leader['gain_90']:+.1f}% | RSI {leader['rsi']:.1f}"
+                    delta=f"{leader['gain_30']:+.1f}% 30D | RSI {leader['rsi']:.1f}"
                 )
 
         st.markdown("<div style='height:12px;'></div>", unsafe_allow_html=True)
@@ -1540,8 +1537,8 @@ with tab_rankings:
                     <th style="text-align:center; background-color:{thm['banner_bg']}; color:{thm['banner_text']};">AVG SCORE</th>
                     <th>PRICE</th>
                     <th>30D MOM (RNK)</th>
-                    <th>90D MOM (RNK)</th>
-                    <th>RVOL ACCUM (RNK)</th>
+                    <th>RS ALPHA (RNK)</th>
+                    <th>RVOL (RNK)</th>
                     <th>14D RSI (RNK)</th>
                     <th>FWD P/E (RNK)</th>
                     <th>PEG (RNK)</th>
@@ -1553,12 +1550,15 @@ with tab_rankings:
         """
         for _, row in df_rank.iterrows():
             c_mom = "pos-cell" if row["gain_30"] >= 0 else "neg-cell"
-            c_mom90 = "pos-cell" if row["gain_90"] >= 0 else "neg-cell"
-            c_rsi = "pos-cell" if (45 <= row["rsi"] <= 65) else ("neg-cell" if row["rsi"] >= 70 or row["rsi"] <= 30 else "")
+            c_alpha = "pos-cell" if row["rs_spy"] >= 0 else "neg-cell"
+            c_rsi = "pos-cell" if row["rsi"] <= 45 else ("neg-cell" if row["rsi"] >= 70 else "")
             c_score = "pos-cell" if row["final_rank"] <= (len(df_rank) // 3) else ""
             spark = make_svg_sparkline(row["sparkline"], is_positive=(row["gain_30"] >= 0))
             badge_color = thm["badge_bull_bg"] if row["final_rank"] <= 3 else thm["card_bg"]
             badge_text = "#FFFFFF" if row["final_rank"] <= 3 else thm["text_color"]
+
+            fwd_str = f"{row['fwd_pe_disp']} (#{row['r_val']})" if row['fwd_pe_disp'] != "--" else f"-- (#{row['r_val']})"
+            peg_str = f"{row['peg_disp']} (#{row['r_peg']})" if row['peg_disp'] != "--" else f"-- (#{row['r_peg']})"
 
             rk_html += f"""
             <tr>
@@ -1567,12 +1567,12 @@ with tab_rankings:
                 <td style="max-width:120px; overflow:hidden; text-overflow:ellipsis;">{row['name']}</td>
                 <td class="{c_score}" style="text-align:center; font-weight:800; font-size:12.5px;">{row['composite_score']:.1f}</td>
                 <td>${row['price']:.2f}</td>
-                <td class="{c_mom}">{row['gain_30']:+.1f}% (#{row['r_mom30']})</td>
-                <td class="{c_mom90}">{row['gain_90']:+.1f}% (#{row['r_mom90']})</td>
+                <td class="{c_mom}">{row['gain_30']:+.1f}% (#{row['r_mom']})</td>
+                <td class="{c_alpha}">{row['rs_spy']:+.1f}% (#{row['r_alpha']})</td>
                 <td>{row['rvol']:.2f}x (#{row['r_rvol']})</td>
                 <td class="{c_rsi}">{row['rsi']:.1f} (#{row['r_rsi']})</td>
-                <td>{row['fwd_pe_disp']} (#{row['r_val']})</td>
-                <td>{row['peg_disp']} (#{row['r_peg']})</td>
+                <td>{fwd_str}</td>
+                <td>{peg_str}</td>
                 <td>{row['mcap_fmt']}</td>
                 <td style="text-align:center;">{spark}</td>
             </tr>
@@ -1584,7 +1584,7 @@ with tab_rankings:
         """
         render_html(rk_html)
     else:
-        st.info("NO STOCKS PASSED THE SELECTION & QUALITY CRITERIA.")
+        st.info("NO STOCKS AVAILABLE TO RANK IN THIS CONFIGURATION.")
 
 # ---------------------------------------------------------
 # TAB 5: COMMODITIES TAB
@@ -1644,26 +1644,25 @@ with tab_glossary:
     with g_col1:
         st.markdown("""
         ### VALUATION & MULTIPLES
-        * **Trailing P/E (Price-to-Earnings):** Current share price divided by actual net income per share over trailing 12 months (TTM).
-        * **Forward P/E:** Current share price divided by consensus 12M expected EPS.
-        * **PEG Ratio (Price/Earnings-to-Growth):** $\\text{P/E Ratio} \\div \\text{Annual Expected EPS Growth Rate}$. Values under **1.0** suggest growth at an attractive price.
-        * **Market Capitalization:** Total equity value of a firm ($\\text{Shares Outstanding} \\times \\text{Share Price}$).
+        * **Trailing P/E (Price-to-Earnings):** Current share price divided by actual net income per share over the trailing 12 months (TTM). Backward-looking, but audited.
+        * **Forward P/E:** Current share price divided by Wall Street consensus EPS estimates over the upcoming 12 months. Highlights whether earnings are expected to expand (compressing the multiple) or contract.
+        * **PEG Ratio (Price/Earnings-to-Growth):** $\\text{P/E Ratio} \\div \\text{Annual Expected EPS Growth Rate}$. A PEG under **1.0** traditionally indicates a company is undervalued relative to its growth trajectory.
+        * **Market Capitalization (Cap):** Total equity value of a firm ($\\text{Shares Outstanding} \\times \\text{Share Price}$). Categorized as Mega-Cap ($200B+), Large-Cap ($10B–$200B), Mid-Cap ($2B–$10B), and Small-Cap (<$2B).
 
         ---
 
-        ### QUALITY GATES
-        * **Operating Margin:** Operating income divided by revenue. Ensures the business is structurally profitable at the core operational level.
-        * **ROE (Return on Equity):** Net income divided by shareholders' equity. Protects against capital-destructive value traps.
+        ### EARNINGS & ACCOUNTING STANDARDS
+        * **EPS (Earnings Per Share):** The net portion of a company's profit allocated to each share of common stock ($\\text{Net Income} \\div \\text{Shares Outstanding}$).
+        * **GAAP Net Income:** Earnings calculated under strict, standardized Generally Accepted Accounting Principles. Mandatory for official SEC 10-K/10-Q filings.
+        * **Non-GAAP ("Adjusted") Earnings:** Operational metrics reported by management that remove non-cash expenses (e.g., stock-based compensation, goodwill impairments) to portray core recurring profitability.
         """)
         
     with g_col2:
         st.markdown("""
         ### ADVANCED TECHNICAL INDICATORS & SIGNALS
-        * **30D & 90D Momentum:** Trailing 22-day and 63-day percentage returns, assessing short-term and intermediate trend continuation.
-        * **Signed RVOL (Relative Volume):** Scaled volume conditioned on price direction. High-volume accumulation days are rewarded; high-volume distribution down-days are penalized.
-        * **Strategy-Aligned RSI:** Ranks RSI based on selected strategy mode:
-          * *Balanced Quality:* Centers on an ideal $\\approx 55$ sweet spot, penalizing blow-off tops and capitulations.
-          * *Trend/Velocity:* Ranks higher RSI descending to follow active breakouts.
-          * *Oversold Reset:* Ranks lower RSI ascending to find oversold turnaround setups.
-        * **Composite Rank Score:** Ordinal rank average across all 6 core factors. Rank 1.0 represents the top cross-sectional candidate.
+        * **14D RSI (Relative Strength Index):** Velocity oscillator measured from 0 to 100. Readings above **70** indicate overbought/extended conditions; readings below **30** indicate oversold washouts. In the composite factor model, lower RSI receives a lower rank (Rank #1) to prioritize cooler, reset entries over extended tops.
+        * **50D Spread (% Distance from 50 SMA):** Quantitative extension relative to the institutional 50-day moving average. Positive values confirm an ongoing uptrend; values exceeding **+12% to +15%** flag severe overextension where institutional buying typically pauses.
+        * **RVOL (Relative Volume):** Ratio of today's volume to the 20-day historical average. An RVOL above **1.50x** confirms heavy institutional participation and authentic breakouts/rotations, while an RVOL below **0.70x** signals low-conviction chop.
+        * **RS vs. SPY (30D Alpha):** Net 30-day percentage outperformance against the S&P 500 ($\\text{Stock 30D \\%} - \\text{SPY 30D \\%}$). Positive values highlight the true leaders attracting rotated institutional capital.
+        * **Composite Rank Score:** Quantitative multi-factor score averaging an asset's ranking across 6 key metrics. Rank 1.0 represents the top-performing profile across the entire universe.
         """)
