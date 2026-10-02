@@ -209,7 +209,7 @@ css_styling = f"""
         border-right: 1px solid {thm['sidebar_border']} !important;
     }}
     
-    /* UNIVERSAL SELECTBOX FIX FOR SIDEBAR & MAIN BODY */
+    /* UNIVERSAL SELECTBOX THEME FIX */
     div[data-baseweb="select"],
     div[data-baseweb="select"] > div,
     div[data-baseweb="select"] div,
@@ -459,6 +459,12 @@ def get_universe_tickers():
             ("MU", "Information Technology", "Micron Technology"),
             ("HPE", "Information Technology", "Hewlett Packard Enterprise"),
             ("DELL", "Information Technology", "Dell Technologies"),
+            ("IT", "Information Technology", "Gartner Inc."),
+            ("LITE", "Information Technology", "Lumentum Holdings"),
+            ("INTC", "Information Technology", "Intel Corporation"),
+            ("COHR", "Information Technology", "Coherent Corp."),
+            ("ACN", "Information Technology", "Accenture plc"),
+            ("CTSH", "Information Technology", "Cognizant Technology"),
             ("JPM", "Financials", "JPMorgan Chase & Co."),
             ("V", "Financials", "Visa Inc."),
             ("MA", "Financials", "Mastercard Inc."),
@@ -512,7 +518,7 @@ def load_or_update_universe():
         try:
             with sqlite3.connect(DB_FILE, timeout=15) as conn:
                 df = pd.read_sql("SELECT * FROM constituents_1000", conn)
-            if not df.empty:
+            if not df.empty and "gain_90" in df.columns:
                 return df
         except Exception:
             pass
@@ -572,6 +578,11 @@ def load_or_update_universe():
                 p_prev = float(close.iloc[-2])
                 chg_today = float((p_last - p_prev) / p_prev * 100)
                 gain_30 = float((p_last - close.iloc[-22]) / close.iloc[-22] * 100)
+                
+                # 90-Day Momentum Calculation (approx 63 trading sessions)
+                idx_90 = -63 if len(close) >= 63 else 0
+                gain_90 = float((p_last - close.iloc[idx_90]) / close.iloc[idx_90] * 100)
+                
                 rs_alpha = round(gain_30 - spy_30d, 2)
 
                 if len(close) >= 50:
@@ -597,6 +608,9 @@ def load_or_update_universe():
                 ema_21 = close.ewm(span=21, adjust=False).mean().iloc[-1]
                 bullish = 1 if ema_9 >= ema_21 else 0
 
+                spark_vals = [f"{float(p):.2f}" for p in close.iloc[-22:].tolist() if not pd.isna(p)]
+                spark_csv = ",".join(spark_vals)
+
                 records.append({
                     "ticker": sym,
                     "name": meta_lookup[sym]["name"],
@@ -604,11 +618,13 @@ def load_or_update_universe():
                     "price": round(p_last, 2),
                     "day_change": round(chg_today, 2),
                     "gain_30": round(gain_30, 2),
+                    "gain_90": round(gain_90, 2),
                     "rs_spy": rs_alpha,
                     "sma_50_dist": sma_50_dist,
                     "rvol": rvol,
                     "rsi": rsi,
                     "bullish": bullish,
+                    "spark_csv": spark_csv,
                     "updated_at": int(now)
                 })
             except Exception:
@@ -662,30 +678,36 @@ def fetch_fundamentals_cached(tickers):
                     fwd_pe = round(float(p_now) / float(fwd_eps), 2)
                 else:
                     trail = info.get("trailingPE")
-                    fwd_pe = float(trail) if trail and float(trail) > 0 else None
+                    fwd_pe = float(trail) if trail and not pd.isna(trail) and float(trail) > 0 else None
             else:
-                fwd_pe = float(fwd_pe)
+                fwd_pe = round(float(fwd_pe), 2)
 
             peg = info.get("pegRatio", None)
-            if peg is not None:
+            if peg is not None and not pd.isna(peg):
                 try:
-                    peg = float(peg)
+                    peg = round(float(peg), 2)
                     if peg <= 0: peg = None
                 except Exception:
                     peg = None
+            else:
+                peg = None
 
             div_y = info.get("dividendYield", None)
             if div_y:
                 div_y = float(div_y) * 100 if float(div_y) < 1.0 else float(div_y)
 
+            op_margins = info.get("operatingMargins", None)
+            roe = info.get("returnOnEquity", None)
+
             return sym, {
                 "market_cap": mcap,
                 "pe_ratio": info.get("trailingPE", None),
                 "fwd_pe": fwd_pe,
-                "forward_pe": fwd_pe,
                 "peg_ratio": peg,
                 "beta": info.get("beta", None),
-                "div_yield": div_y
+                "div_yield": div_y,
+                "op_margins": float(op_margins) if op_margins and not pd.isna(op_margins) else None,
+                "roe": float(roe) if roe and not pd.isna(roe) else None
             }
         except Exception:
             return sym, {}
@@ -738,7 +760,7 @@ def fetch_live_active_quotes(tickers):
                     chg_dlr = float(p_now - p_prev)
                     chg_pct = float(chg_dlr / p_prev * 100) if p_prev > 0 else 0.0
                     vol = int(v_series.iloc[-1]) if len(v_series) > 0 else 0
-                    spark = [float(p) for p in series.iloc[-22:].tolist()]
+                    spark = [float(p) for p in series.iloc[-22:].tolist() if not pd.isna(p)]
             except Exception:
                 pass
 
@@ -751,10 +773,11 @@ def fetch_live_active_quotes(tickers):
             "market_cap": f.get("market_cap"),
             "pe_ratio": f.get("pe_ratio"),
             "fwd_pe": f.get("fwd_pe"),
-            "forward_pe": f.get("fwd_pe"),
             "peg_ratio": f.get("peg_ratio"),
             "beta": f.get("beta"),
             "div_yield": f.get("div_yield"),
+            "op_margins": f.get("op_margins"),
+            "roe": f.get("roe"),
             "sparkline": spark
         }
     return results
@@ -762,11 +785,14 @@ def fetch_live_active_quotes(tickers):
 def make_svg_sparkline(prices, is_positive=True, width=90, height=18):
     if not prices or len(prices) < 2:
         return '<span style="color:#64748B; font-size:10px;">--</span>'
-    min_p, max_p = min(prices), max(prices)
+    clean = [float(p) for p in prices if p is not None and not np.isnan(p)]
+    if len(clean) < 2:
+        return '<span style="color:#64748B; font-size:10px;">--</span>'
+    min_p, max_p = min(clean), max(clean)
     rng = max_p - min_p if max_p != min_p else 1.0
     pts = []
-    step = width / (len(prices) - 1)
-    for i, p in enumerate(prices):
+    step = width / (len(clean) - 1)
+    for i, p in enumerate(clean):
         x = i * step
         y = height - ((p - min_p) / rng * (height - 4) + 2)
         pts.append(f"{x:.1f},{y:.1f}")
@@ -1090,7 +1116,14 @@ with tab_sector:
         peg = live.get("peg_ratio", None)
         beta = live.get("beta", None)
         div_y = live.get("div_yield", None)
-        spark = live.get("sparkline", [])
+        
+        # Pull sparkline from live or fallback to cached database spark_csv
+        spark = live.get("sparkline")
+        if not spark and "spark_csv" in row and row["spark_csv"]:
+            try:
+                spark = [float(x) for x in str(row["spark_csv"]).split(",") if x]
+            except Exception:
+                spark = []
 
         rows.append({
             "ticker": t,
@@ -1111,7 +1144,7 @@ with tab_sector:
             "rvol": row["rvol"],
             "rs_spy": row["rs_spy"],
             "bullish": bool(row["bullish"] == 1),
-            "sparkline": spark
+            "sparkline": spark or []
         })
 
     if rows:
@@ -1404,20 +1437,19 @@ with tab_scatter:
         st.info("NO DATA AVAILABLE FOR SELECTED MATRIX.")
 
 # ---------------------------------------------------------
-# TAB 4: COMPOSITE FACTOR RANKING LEADERBOARD (INVERTED RSI)
+# TAB 4: COMPOSITE FACTOR RANKING LEADERBOARD (EXACT RESTORATION)
 # ---------------------------------------------------------
 with tab_rankings:
     st.markdown("<div class='section-banner'>MULTI-FACTOR COMPOSITE LEADERBOARD // QUANTITATIVE FACTOR SCORING</div>", unsafe_allow_html=True)
     st.markdown(
         f"<p style='font-size:11.5px; color:{thm['card_border']}; margin-top:4px; margin-bottom:12px;'>"
-        f"Each constituent is ranked from 1 to N across 6 metrics (30D Momentum, RS vs SPY Alpha, RVOL, 14D RSI, Forward P/E, PEG Ratio). "
-        f"<b>Lowest Average Score = #1 Ranked Stock</b> (Rank 1.0 is the best possible score). "
-        f"<i>RSI is ranked ascending so cooler, oversold reset entries (lower numbers) receive top ranks. Unprofitable/missing valuations are placed at the bottom.</i>"
+        f"Constituents are ranked 1 to N across 6 metrics (30D Momentum, 90D Momentum, Directional Signed RVOL, Strategy-Aligned RSI, Forward P/E, PEG Ratio). "
+        f"Lowest Composite Score = #1 Top Profile."
         f"</p>",
         unsafe_allow_html=True
     )
 
-    rk_col1, rk_col2, rk_col3 = st.columns([1.5, 1.2, 1.2])
+    rk_col1, rk_col2, rk_col3, rk_col4 = st.columns([1.3, 1.5, 1.2, 1.3])
     with rk_col1:
         rank_sector = st.selectbox(
             "SELECT SECTOR FOR RANKINGS",
@@ -1426,18 +1458,36 @@ with tab_rankings:
             key="rank_sector_sel"
         )
     with rk_col2:
+        strategy_profile = st.selectbox(
+            "STRATEGY FACTOR PROFILE",
+            [
+                "Balanced Quality Momentum (Default)",
+                "High Velocity Momentum",
+                "GARP & Value Discipline",
+                "Oversold Reversal (Mean Reversion)"
+            ],
+            index=0,
+            key="strategy_profile_sel"
+        )
+    with rk_col3:
         rank_stock_count = st.select_slider(
             "STOCKS TO EVALUATE",
             options=[10, 20, 30, 40, 50],
-            value=40,
+            value=50,
             key="rank_count_slider"
         )
-    with rk_col3:
+    with rk_col4:
         rank_custom_input = st.text_input(
             "ADD CUSTOM TICKERS TO POOL",
             placeholder="e.g. PLTR, SMCI, TSM",
             key="rank_custom_txt"
         )
+
+    quality_gate = st.checkbox(
+        "Enforce Quality Gate (Positive Operating Margin & ROE)",
+        value=True,
+        key="quality_gate_chk"
+    )
 
     base_rank_df = UNIVERSE_DF[UNIVERSE_DF["sector"] == rank_sector].head(int(rank_stock_count))
     eval_tickers = base_rank_df["ticker"].tolist()
@@ -1455,12 +1505,15 @@ with tab_rankings:
 
         p_now = live.get("price") or (cached_r["price"] if cached_r is not None else 100.0)
         gain_30 = cached_r["gain_30"] if cached_r is not None else 0.0
-        rs_spy = cached_r["rs_spy"] if cached_r is not None else 0.0
+        
+        # Pull 90D momentum
+        gain_90 = cached_r["gain_90"] if (cached_r is not None and "gain_90" in cached_r) else gain_30
+        
         rvol = cached_r["rvol"] if cached_r is not None else 1.0
         rsi = cached_r["rsi"] if cached_r is not None else 50.0
 
-        # Robust forward P/E and PEG extraction
-        fwd_pe_raw = live.get("fwd_pe") or live.get("forward_pe")
+        # Forward PE extraction with fallback
+        fwd_pe_raw = live.get("fwd_pe")
         if fwd_pe_raw is not None and not pd.isna(fwd_pe_raw) and float(fwd_pe_raw) > 0:
             fwd_pe_num = float(fwd_pe_raw)
             fwd_pe_disp = f"{fwd_pe_num:.1f}"
@@ -1468,6 +1521,7 @@ with tab_rankings:
             fwd_pe_num = np.nan
             fwd_pe_disp = "--"
 
+        # PEG extraction
         peg_raw = live.get("peg_ratio")
         if peg_raw is not None and not pd.isna(peg_raw) and float(peg_raw) > 0:
             peg_num = float(peg_raw)
@@ -1478,12 +1532,20 @@ with tab_rankings:
 
         mcap = live.get("market_cap", None)
 
+        # Pull sparkline from live or fallback to cached database spark_csv
+        spark = live.get("sparkline")
+        if not spark and cached_r is not None and "spark_csv" in cached_r and cached_r["spark_csv"]:
+            try:
+                spark = [float(x) for x in str(cached_r["spark_csv"]).split(",") if x]
+            except Exception:
+                spark = []
+
         rank_raw.append({
             "ticker": t,
             "name": cached_r["name"] if cached_r is not None else t,
             "price": p_now,
             "gain_30": gain_30,
-            "rs_spy": rs_spy,
+            "gain_90": gain_90,
             "rvol": rvol,
             "rsi": rsi,
             "fwd_pe": fwd_pe_num,
@@ -1491,26 +1553,60 @@ with tab_rankings:
             "peg": peg_num,
             "peg_disp": peg_disp,
             "mcap_fmt": fmt_mcap(mcap),
-            "sparkline": live.get("sparkline", [])
+            "op_margins": live.get("op_margins"),
+            "roe": live.get("roe"),
+            "sparkline": spark or []
         })
 
     if rank_raw:
         df_rank = pd.DataFrame(rank_raw)
-        
-        # 1 = best
-        df_rank["r_mom"] = df_rank["gain_30"].rank(ascending=False, method="min").astype(int)
-        df_rank["r_alpha"] = df_rank["rs_spy"].rank(ascending=False, method="min").astype(int)
+
+        # Filter or penalize via Quality Gate if enabled
+        if quality_gate:
+            def passes_gate(row):
+                op = row.get("op_margins")
+                ro = row.get("roe")
+                # Pass if positive or not explicitly verified negative
+                if op is not None and op < 0: return False
+                if ro is not None and ro < 0: return False
+                return True
+            df_rank["passed_gate"] = df_rank.apply(passes_gate, axis=1)
+        else:
+            df_rank["passed_gate"] = True
+
+        # Calculate individual factor ranks
+        df_rank["r_30m"] = df_rank["gain_30"].rank(ascending=False, method="min").astype(int)
+        df_rank["r_90m"] = df_rank["gain_90"].rank(ascending=False, method="min").astype(int)
         df_rank["r_rvol"] = df_rank["rvol"].rank(ascending=False, method="min").astype(int)
         
-        # Inverted RSI: cooler/lower RSI = rank 1 (Best)
-        df_rank["r_rsi"] = df_rank["rsi"].rank(ascending=True, method="min").astype(int)
-        
-        # Valuation ranks: lowest positive multiple = 1; NaN/unprofitable = ranked last (na_option="bottom")
+        # Strategy-aligned RSI rank
+        if strategy_profile == "High Velocity Momentum":
+            df_rank["r_rsi"] = df_rank["rsi"].rank(ascending=False, method="min").astype(int)
+        else:
+            # Cooler, oversold reset entries receive top rank
+            df_rank["r_rsi"] = df_rank["rsi"].rank(ascending=True, method="min").astype(int)
+
         df_rank["r_val"] = df_rank["fwd_pe"].rank(ascending=True, method="min", na_option="bottom").astype(int)
         df_rank["r_peg"] = df_rank["peg"].rank(ascending=True, method="min", na_option="bottom").astype(int)
 
-        rank_cols = ["r_mom", "r_alpha", "r_rvol", "r_rsi", "r_val", "r_peg"]
-        df_rank["composite_score"] = df_rank[rank_cols].mean(axis=1)
+        # Apply weights based on strategy factor profile
+        if strategy_profile == "High Velocity Momentum":
+            weights = {"r_30m": 2.0, "r_90m": 2.0, "r_rvol": 1.5, "r_rsi": 1.0, "r_val": 0.5, "r_peg": 0.5}
+        elif strategy_profile == "GARP & Value Discipline":
+            weights = {"r_30m": 0.5, "r_90m": 1.0, "r_rvol": 0.5, "r_rsi": 0.5, "r_val": 2.0, "r_peg": 2.0}
+        elif strategy_profile == "Oversold Reversal (Mean Reversion)":
+            weights = {"r_30m": 0.5, "r_90m": 0.5, "r_rvol": 1.5, "r_rsi": 2.5, "r_val": 1.0, "r_peg": 1.0}
+        else: # Balanced Quality Momentum (Default)
+            weights = {"r_30m": 1.0, "r_90m": 1.0, "r_rvol": 1.0, "r_rsi": 1.0, "r_val": 1.0, "r_peg": 1.0}
+
+        weighted_sum = sum(df_rank[col] * w for col, w in weights.items())
+        total_w = sum(weights.values())
+        df_rank["composite_score"] = weighted_sum / total_w
+
+        # If quality gate failed, apply ranking penalty to demote to bottom
+        if quality_gate:
+            df_rank.loc[~df_rank["passed_gate"], "composite_score"] += 100.0
+
         df_rank = df_rank.sort_values(by="composite_score", ascending=True).reset_index(drop=True)
         df_rank["final_rank"] = df_rank.index + 1
 
@@ -1521,7 +1617,7 @@ with tab_rankings:
                 st.metric(
                     label=f"RANK #{leader['final_rank']} LEADER // {leader['ticker']}",
                     value=f"Score: {leader['composite_score']:.1f}",
-                    delta=f"{leader['gain_30']:+.1f}% 30D | RSI {leader['rsi']:.1f}"
+                    delta=f"{leader['gain_30']:+.1f}% 30D | 90D: {leader['gain_90']:+.1f}% | RSI {leader['rsi']:.1f}"
                 )
 
         st.markdown("<div style='height:12px;'></div>", unsafe_allow_html=True)
@@ -1537,8 +1633,8 @@ with tab_rankings:
                     <th style="text-align:center; background-color:{thm['banner_bg']}; color:{thm['banner_text']};">AVG SCORE</th>
                     <th>PRICE</th>
                     <th>30D MOM (RNK)</th>
-                    <th>RS ALPHA (RNK)</th>
-                    <th>RVOL (RNK)</th>
+                    <th>90D MOM (RNK)</th>
+                    <th>RVOL ACCUM (RNK)</th>
                     <th>14D RSI (RNK)</th>
                     <th>FWD P/E (RNK)</th>
                     <th>PEG (RNK)</th>
@@ -1549,8 +1645,8 @@ with tab_rankings:
             <tbody>
         """
         for _, row in df_rank.iterrows():
-            c_mom = "pos-cell" if row["gain_30"] >= 0 else "neg-cell"
-            c_alpha = "pos-cell" if row["rs_spy"] >= 0 else "neg-cell"
+            c_30m = "pos-cell" if row["gain_30"] >= 0 else "neg-cell"
+            c_90m = "pos-cell" if row["gain_90"] >= 0 else "neg-cell"
             c_rsi = "pos-cell" if row["rsi"] <= 45 else ("neg-cell" if row["rsi"] >= 70 else "")
             c_score = "pos-cell" if row["final_rank"] <= (len(df_rank) // 3) else ""
             spark = make_svg_sparkline(row["sparkline"], is_positive=(row["gain_30"] >= 0))
@@ -1567,8 +1663,8 @@ with tab_rankings:
                 <td style="max-width:120px; overflow:hidden; text-overflow:ellipsis;">{row['name']}</td>
                 <td class="{c_score}" style="text-align:center; font-weight:800; font-size:12.5px;">{row['composite_score']:.1f}</td>
                 <td>${row['price']:.2f}</td>
-                <td class="{c_mom}">{row['gain_30']:+.1f}% (#{row['r_mom']})</td>
-                <td class="{c_alpha}">{row['rs_spy']:+.1f}% (#{row['r_alpha']})</td>
+                <td class="{c_30m}">{row['gain_30']:+.1f}% (#{row['r_30m']})</td>
+                <td class="{c_90m}">{row['gain_90']:+.1f}% (#{row['r_90m']})</td>
                 <td>{row['rvol']:.2f}x (#{row['r_rvol']})</td>
                 <td class="{c_rsi}">{row['rsi']:.1f} (#{row['r_rsi']})</td>
                 <td>{fwd_str}</td>
@@ -1663,6 +1759,6 @@ with tab_glossary:
         * **14D RSI (Relative Strength Index):** Velocity oscillator measured from 0 to 100. Readings above **70** indicate overbought/extended conditions; readings below **30** indicate oversold washouts. In the composite factor model, lower RSI receives a lower rank (Rank #1) to prioritize cooler, reset entries over extended tops.
         * **50D Spread (% Distance from 50 SMA):** Quantitative extension relative to the institutional 50-day moving average. Positive values confirm an ongoing uptrend; values exceeding **+12% to +15%** flag severe overextension where institutional buying typically pauses.
         * **RVOL (Relative Volume):** Ratio of today's volume to the 20-day historical average. An RVOL above **1.50x** confirms heavy institutional participation and authentic breakouts/rotations, while an RVOL below **0.70x** signals low-conviction chop.
-        * **RS vs. SPY (30D Alpha):** Net 30-day percentage outperformance against the S&P 500 ($\\text{Stock 30D \\%} - \\text{SPY 30D \\%}$). Positive values highlight the true leaders attracting rotated institutional capital.
+        * **90D Momentum:** Multi-month trend strength evaluating quarterly institutional accumulation.
         * **Composite Rank Score:** Quantitative multi-factor score averaging an asset's ranking across 6 key metrics. Rank 1.0 represents the top-performing profile across the entire universe.
         """)
